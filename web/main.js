@@ -225,15 +225,16 @@ const ship = new THREE.Group(); scene.add(ship);
 })();
 
 /* ================= flight state ================= */
-const st = { pos: V(), quat: new THREE.Quaternion(), vel: V(), thr: 0, auto: null, yaw: 0, pitch: 0, roll: 0 };
+const st = { pos: V(), quat: new THREE.Quaternion(), vel: V(), thr: 0, auto: null, aim: null, yaw: 0, pitch: 0, roll: 0, hull: 1, dead: false };
 const camQ = new THREE.Quaternion();
 placeBodies(Date.now());
-(function startNearEarth() {
+function startNearEarth() {
   const e = P.earth.pos, toSun = e.clone().negate().normalize(), side = V(0, 1, 0).cross(toSun).normalize();
   st.pos.copy(e).addScaledVector(toSun.clone().applyAxisAngle(V(0, 1, 0), .9), P.earth.R * 3.4).addScaledVector(V(0, 1, 0), P.earth.R * .5);
   const m = new THREE.Matrix4().lookAt(st.pos, e.clone().addScaledVector(side, P.earth.R * 1.3), V(0, 1, 0)); st.quat.setFromRotationMatrix(m);
-  camQ.copy(st.quat);
-})();
+  camQ.copy(st.quat); st.vel.set(0, 0, 0); st.thr = 0; st.auto = st.aim = null; st.hull = 1; st.dead = false;
+}
+startNearEarth();
 const fwd = V(), tmp = V(), tmp2 = V(), qd = new THREE.Quaternion(), eul = new THREE.Euler();
 function nearest() {
   let best = null, alt = Infinity;
@@ -244,7 +245,7 @@ function flyStep(dt) {
   const [nb, alt] = nearest();
   const vmax = clamp(Math.max(alt, 0) * .9, .0004, 6e5);
   if (st.auto) {
-    const tg = st.auto, dist = tg.pos.distanceTo(st.pos), park = tg.R * (tg.id === 'sun' ? 2.2 : tg.id === 'saturn' ? 4.2 : 3.2), left = dist - park;
+    const tg = st.auto, dist = tg.pos.distanceTo(st.pos), park = tg.R * (tg.id === 'sun' ? 15 : tg.id === 'saturn' ? 4.2 : 3.2), left = dist - park;
     tmp.subVectors(tg.pos, st.pos).normalize();
     const m = new THREE.Matrix4().lookAt(V(), tmp, tmp2.set(0, 1, 0).applyQuaternion(st.quat)); qd.setFromRotationMatrix(m);
     st.quat.slerp(qd, 1 - Math.exp(-dt * 2.2));
@@ -252,8 +253,17 @@ function flyStep(dt) {
     const facing = fwd.dot(tmp), want = facing > .97 ? Math.min(vmax, Math.max(left, 0) * 1.3) : vmax * .02;
     st.thr = clamp(want / vmax, 0, 1);
     if (left < tg.R * .03 && st.vel.length() < tg.R * .2) { st.auto = null; st.thr = 0; updateAutoUi(); }
+  } else if (st.aim) {
+    // turn to face a body without flying anywhere
+    tmp.subVectors(st.aim.pos, st.pos).normalize();
+    qd.setFromRotationMatrix(new THREE.Matrix4().lookAt(V(), tmp, V(0, 1, 0)));
+    st.quat.slerp(qd, 1 - Math.exp(-dt * 2.6));
+    if (fwd.set(0, 0, -1).applyQuaternion(st.quat).dot(tmp) > .9995) st.aim = null;
   } else {
     eul.set(st.pitch * dt, st.yaw * dt, st.roll * dt, 'XYZ'); qd.setFromEuler(eul); st.quat.multiply(qd).normalize();
+    // gently level the wings with the plane of the planets, so "up" stays up
+    fwd.set(0, 0, -1).applyQuaternion(st.quat);
+    if (!st.roll && Math.abs(fwd.y) < .85) { const err = tmp2.set(1, 0, 0).applyQuaternion(st.quat).y; eul.set(0, 0, -err * dt * 1.4); qd.setFromEuler(eul); st.quat.multiply(qd).normalize(); }
   }
   fwd.set(0, 0, -1).applyQuaternion(st.quat);
   tmp.copy(fwd).multiplyScalar(st.thr * vmax);
@@ -267,11 +277,66 @@ function flyStep(dt) {
   return [nb, alt];
 }
 
+/* ================= heat near the Sun ================= */
+// equilibrium temperature of a body in sunlight: T = 5772 K * sqrt(R_sun / 2d). 5 °C at Earth's distance.
+// The shuttle's leading edges (reinforced carbon-carbon) survive about 1 600 °C.
+const MELT = 1600;
+const hullTemp = () => 5772 * Math.sqrt(sunR / (2 * Math.max(st.pos.distanceTo(sunBody.pos), sunR))) - 273;
+let actx = null, lastBeep = 0;
+function beep(f, len = .12, vol = .08) {
+  if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = 'square'; o.frequency.value = f;
+  g.gain.setValueAtTime(vol, actx.currentTime); g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime + len); o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + len);
+}
+function heat(dt, now) {
+  const T = hullTemp(), danger = THREE.MathUtils.smoothstep(T, 900, 1600);
+  if (T > MELT && !st.dead) st.hull = Math.max(0, st.hull - dt * (T - MELT + 150) / 900);
+  $('hHullS').hidden = T < 150 && st.hull >= 1;
+  $('hHull').textContent = `${fmt(Math.round(T))} °C` + (st.hull < 1 ? ` · ${Math.round(st.hull * 100)}%` : '');
+  const a = $('alert');
+  if (st.dead || T < 400) a.hidden = true;
+  else {
+    a.hidden = false; a.className = 'alert ' + (T < 1100 ? 'warn' : 'danger');
+    $('alertH').textContent = T < 1100 ? t('heatWarnH') : T < MELT ? t('heatDangerH') : t('heatMeltH');
+    $('alertP').textContent = t(T < 1100 ? 'heatWarnP' : T < MELT ? 'heatDangerP' : 'heatMeltP', { t: `${fmt(Math.round(T))} °C`, p: Math.round(st.hull * 100) });
+  }
+  $('heatfx').style.opacity = st.dead ? 0 : danger;
+  if (!st.dead && T >= 1100 && now - lastBeep > (T > MELT ? 260 : 600)) { lastBeep = now; beep(T > MELT ? 1180 : 880); }
+  if (!st.dead && st.hull <= 0) explode(T);
+  return danger;
+}
+const BOOM = 900, boomPos = new Float32Array(BOOM * 3), boomVel = new Float32Array(BOOM * 3), boomCol = new Float32Array(BOOM * 3);
+const boomGeo = new THREE.BufferGeometry(); boomGeo.setAttribute('position', new THREE.BufferAttribute(boomPos, 3)); boomGeo.setAttribute('color', new THREE.BufferAttribute(boomCol, 3));
+const boom = new THREE.Points(boomGeo, new THREE.PointsMaterial({ size: SHIP * .12, map: glowTex([[0, 'rgba(255,255,255,1)'], [.35, 'rgba(255,255,255,.6)'], [1, 'rgba(255,255,255,0)']]), vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+boom.visible = false; boom.frustumCulled = false; scene.add(boom); let boomT = 0;
+function explode(T) {
+  st.dead = true; st.thr = 0; st.auto = st.aim = null; updateAutoUi();
+  for (let i = 0; i < BOOM; i++) {
+    const u = Math.random() * 2 - 1, a = Math.random() * 6.283, r = Math.sqrt(1 - u * u), sp = SHIP * (.3 + Math.random() * Math.random() * 6);
+    boomPos.set([0, 0, 0], i * 3); boomVel.set([r * Math.cos(a) * sp, u * sp, r * Math.sin(a) * sp], i * 3);
+    const h = Math.random(); boomCol.set(h < .5 ? [1, .85, .55] : h < .85 ? [1, .45, .12] : [.6, .6, .65], i * 3);
+  }
+  boomGeo.attributes.position.needsUpdate = boomGeo.attributes.color.needsUpdate = true;
+  boom.visible = true; boomT = 0; ship.visible = false;
+  const f = $('flash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = ''; f.style.opacity = 0; });
+  if (actx) { beep(90, 1.4, .25); beep(55, 2, .2); }
+  const d = st.pos.distanceTo(sunBody.pos) - sunR;
+  $('deadP').textContent = t('deadP', { d: distFmt(d), t: `${fmt(Math.round(T))} °C` });
+  setTimeout(() => { $('dead').hidden = false; }, 1700);
+}
+function boomStep(dt) {
+  if (!boom.visible) return; boomT += dt;
+  for (let i = 0; i < BOOM * 3; i++) boomPos[i] += boomVel[i] * dt;
+  boom.material.opacity = Math.max(0, 1 - boomT / 3.5); boomGeo.attributes.position.needsUpdate = true;
+  if (boomT > 3.6) boom.visible = false;
+}
+$('bRespawn').onclick = () => { $('dead').hidden = true; boom.visible = false; ship.visible = true; startNearEarth(); };
+
 /* ================= camera ================= */
 const camOff = V(0, SHIP * .55, SHIP * 3.3), camLook = V(0, SHIP * .5, -SHIP * 2);
-function placeCamera(dt) {
+function placeCamera(dt, shake = 0) {
   camQ.slerp(st.quat, 1 - Math.exp(-dt * 5));
   camera.position.copy(camOff).applyQuaternion(camQ);
+  if (shake) camera.position.add(tmp.set(Math.random() - .5, Math.random() - .5, Math.random() - .5).multiplyScalar(SHIP * .06 * shake));
   camera.up.set(0, 1, 0).applyQuaternion(camQ);
   camera.lookAt(tmp.copy(camLook).applyQuaternion(st.quat));
   ship.quaternion.copy(st.quat);
@@ -287,13 +352,30 @@ function distFmt(u) {
   if (km < 1.5e9) return `${fmt(km / 1e6, km < 1e7 ? 1 : 0)} ${t('mlnKm')}`;
   return `${fmt(km / 1.496e8, 1)} ${t('au')}`;
 }
+const vv = V();
+function edgeMark(b, show) {
+  if (!b.edge) { const el = document.createElement('div'); el.className = 'edge' + (b.id === 'sun' ? ' sun' : ''); el.innerHTML = '<i></i><span></span>'; el.onclick = () => { st.aim = b; st.auto = null; updateAutoUi(); }; labelsEl.appendChild(el); b.edge = el; }
+  const el = b.edge; if (!show) { el.style.display = 'none'; return; }
+  vv.subVectors(b.pos, st.pos).applyMatrix4(camera.matrixWorldInverse);
+  let dx = vv.x, dy = -vv.y; if (Math.hypot(dx, dy) < 1e-9) dy = 1;
+  const L = Math.hypot(dx, dy); dx /= L; dy /= L;
+  const W2 = innerWidth / 2 - 54, Ht = innerHeight / 2 - (mob ? 150 : 96), Hb = innerHeight / 2 - (mob ? 120 : 86);
+  const k = Math.min(W2 / Math.max(Math.abs(dx), 1e-6), (dy < 0 ? Ht : Hb) / Math.max(Math.abs(dy), 1e-6));
+  el.style.display = ''; el.style.transform = `translate(${innerWidth / 2 + dx * k}px,${innerHeight / 2 + dy * k}px) translate(-50%,-50%)`;
+  el.firstChild.style.transform = `rotate(${Math.atan2(dy, dx) + Math.PI / 2}rad)`;
+  el.lastChild.textContent = D.bodies[b.id]; el.classList.toggle('aim', st.aim === b);
+}
 function drawLabels(nb) {
+  // which off-screen bodies get an arrow at the edge: the Sun, the autopilot target, the two nearest
+  const near2 = ALL.filter(b => b.id !== 'sun').sort((a, c) => a.pos.distanceToSquared(st.pos) - c.pos.distanceToSquared(st.pos)).slice(0, 2);
   for (const b of ALL) {
     proj.subVectors(b.pos, st.pos).project(camera);
+    const onScreen = proj.z <= 1 && Math.abs(proj.x) < .97 && Math.abs(proj.y) < .97;
+    edgeMark(b, !onScreen && !st.dead && (b.id === 'sun' || b === st.auto || b === st.aim || near2.includes(b)));
     const d = b.pos.distanceTo(st.pos) - b.R, el = b.lbl;
     // hide a label when that body fills the screen or sits behind the camera
     const big = b.R / Math.max(d, 1e-6) > .35;
-    if (proj.z > 1 || big) { el.style.opacity = 0; el.style.pointerEvents = 'none'; continue; }
+    if (proj.z > 1 || big || !onScreen || st.dead) { el.style.opacity = 0; el.style.pointerEvents = 'none'; continue; }
     el.style.opacity = 1; el.style.pointerEvents = 'auto';
     el.textContent = `${D.bodies[b.id]} · ${distFmt(d)}`;
     el.classList.toggle('target', st.auto === b);
@@ -316,6 +398,7 @@ function hud(nb, alt) {
   $('hSpeed').textContent = speedFmt(st.vel.length());
   $('hNearK').textContent = `${t('near')}: ${D.bodies[nb.id]}`;
   $('hAlt').textContent = `${distFmt(alt)} ${t('alt')}`;
+  $('bAim').textContent = t('aimBtn', { name: D.bodies[nb.id] });
   showCard(alt < nb.R * 4 ? nb : null);
   setThrUi();
 }
@@ -333,7 +416,8 @@ function buildMenu() {
 $('card').onclick = () => $('card').classList.toggle('open');
 $('bWhere').onclick = () => { buildMenu(); $('menu').hidden = false; };
 $('menu').addEventListener('click', e => { if (e.target.id === 'menu') $('menu').hidden = true; });
-$('bStop').onclick = () => { st.auto = null; st.thr = 0; updateAutoUi(); };
+$('bStop').onclick = () => { st.auto = st.aim = null; st.thr = 0; updateAutoUi(); };
+$('bAim').onclick = () => { const [nb] = nearest(); st.aim = nb; st.auto = null; updateAutoUi(); };
 
 /* ================= controls ================= */
 // steering: press anywhere on the sky and drag — the offset from where you pressed is the stick
@@ -342,7 +426,7 @@ canvas.addEventListener('pointerdown', e => { sp = { id: e.pointerId, x: e.clien
 canvas.addEventListener('pointermove', e => {
   if (!sp || e.pointerId !== sp.id) return;
   let dx = (e.clientX - sp.x) / 60, dy = (e.clientY - sp.y) / 60; const m = Math.hypot(dx, dy); if (m > 1) { dx /= m; dy /= m; }
-  st.yaw = -dx * 1.1; st.pitch = -dy * .9; if (Math.abs(dx) + Math.abs(dy) > .15 && st.auto) { st.auto = null; updateAutoUi(); }
+  st.yaw = -dx * 1.1; st.pitch = -dy * .9; if (Math.abs(dx) + Math.abs(dy) > .15) { st.aim = null; if (st.auto) { st.auto = null; updateAutoUi(); } }
   knob.style.transform = `translate(${dx * 37}px,${dy * 37}px)`;
 });
 const endStick = e => { if (sp && e.pointerId === sp.id) { sp = null; st.yaw = st.pitch = 0; stick.hidden = true; } };
@@ -363,7 +447,7 @@ function keyInput(dt) {
   if (k('KeyW') || k('ShiftLeft')) st.thr = clamp(st.thr + dt * .5, 0, 1);
   if (k('KeyS') || k('ControlLeft')) st.thr = clamp(st.thr - dt * .7, 0, 1);
   const kb = k('ArrowLeft') || k('ArrowRight') || k('ArrowUp') || k('ArrowDown') || k('KeyA') || k('KeyD') || k('KeyQ') || k('KeyE');
-  if (kb && st.auto) { st.auto = null; updateAutoUi(); }
+  if (kb) { st.aim = null; if (st.auto) { st.auto = null; updateAutoUi(); } }
   if (!sp) { st.yaw = (k('ArrowLeft') ? 1 : 0) - (k('ArrowRight') ? 1 : 0); st.pitch = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0); }
   st.roll = ((k('KeyA') || k('KeyQ')) ? 1.2 : 0) - ((k('KeyD') || k('KeyE')) ? 1.2 : 0);
 }
@@ -379,7 +463,7 @@ function applyLang(l) {
 }
 LANGS.forEach(l => { const b = document.createElement('button'); b.type = 'button'; b.dataset.l = l; b.textContent = I18N[l]._name; b.onclick = () => applyLang(l); $('langs').appendChild(b); });
 applyLang(lang);
-$('bGo').onclick = () => { $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi(); };
+$('bGo').onclick = () => { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi(); };
 
 /* ================= loop ================= */
 const uniformsOf = b => b.mesh.material.uniforms;
@@ -387,8 +471,9 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now;
   placeBodies(Date.now());
-  keyInput(dt);
-  const [nb, alt] = flyStep(dt);
+  if (!st.dead) keyInput(dt); else { st.yaw = st.pitch = st.roll = 0; st.thr = 0; }
+  const [nb, alt] = st.dead ? nearest() : flyStep(dt);
+  const danger = $('hud').hidden ? 0 : heat(dt, now); boomStep(dt);
   // floating origin: everything relative to the ship
   sun.position.subVectors(sunBody.pos, st.pos); sunGlow.position.copy(sun.position); sunStar.position.copy(sun.position); sunLight.position.copy(sun.position);
   sun.material.uniforms.uTime.value = now / 1000; sun.material.uniforms.uNear.value = 1 - THREE.MathUtils.smoothstep(sun.position.length() / sunR, 1.1, 2.5);
@@ -407,7 +492,7 @@ function frame(now) {
   sunStar.material.opacity = THREE.MathUtils.smoothstep(sun.position.length() / sunR, 30, 200);
   sky.position.set(0, 0, 0);
   for (const f of ship.userData.flames) { f.scale.set(1, .15 + st.thr * (1 + Math.random() * .25), 1); f.material.opacity = .25 + st.thr * .7; }
-  placeCamera(dt);
+  placeCamera(dt, danger);
   renderer.render(scene, camera);
   if (!$('hud').hidden) { hud(nb, alt); drawLabels(nb); }
   requestAnimationFrame(frame);
@@ -416,7 +501,7 @@ addEventListener('resize', () => { mob = innerWidth < 760; renderer.setSize(inne
 requestAnimationFrame(frame);
 // for tests: put the ship at k radii from a body and face it
 function look(id, k = 3, side = .6, up = .25) {
-  const b = ALL.find(x => x.id === id), dir = b.pos.clone().negate().normalize().applyAxisAngle(V(0, 1, 0), side);
+  const b = ALL.find(x => x.id === id), dir = (b.id === 'sun' ? P.earth.pos.clone() : b.pos.clone().negate()).normalize().applyAxisAngle(V(0, 1, 0), side);
   st.pos.copy(b.pos).addScaledVector(dir, b.R * k).addScaledVector(V(0, 1, 0), b.R * up); st.vel.set(0, 0, 0); st.thr = 0; st.auto = null;
   st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, b.pos.clone().addScaledVector(V(0, 1, 0).cross(dir).normalize(), b.R * .35), V(0, 1, 0))); camQ.copy(st.quat);
 }

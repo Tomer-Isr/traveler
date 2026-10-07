@@ -58,3 +58,19 @@ button{font:inherit;color:inherit}
   .card.open dl{display:grid}
   .card p{font-size:12.5px}
 }
+.h-stat.hot b{color:#ff8a5c}
+.heatfx{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:2;background:radial-gradient(ellipse at center,rgba(255,90,0,0) 35%,rgba(255,70,0,.35) 70%,rgba(255,40,0,.75) 100%)}
+.flash{position:fixed;inset:0;background:#fff4dc;opacity:0;pointer-events:none;z-index:7;transition:opacity 1.8s ease-out}
+.alert{position:fixed;left:16px;right:16px;top:24%;display:grid;justify-items:center;gap:6px;text-align:center;z-index:6;pointer-events:none}
+.alert b{font:700 clamp(30px,8vw,64px)/1 var(--f-disp);letter-spacing:.03em;color:#ff5a3c;text-shadow:0 0 28px rgba(255,60,0,.65)}
+.alert span{font:600 15px var(--f-text);color:#ffe2d0;text-shadow:0 1px 8px #000;max-width:520px}
+.alert.warn b{font-size:clamp(18px,4.6vw,26px);color:var(--sun);text-shadow:0 1px 10px #000}
+.alert.danger b{animation:alarm .7s steps(2) infinite}
+@keyframes alarm{50%{opacity:.25}}
+.dead{position:fixed;inset:0;display:grid;place-items:center;z-index:20;padding:16px;background:radial-gradient(ellipse at center,rgba(40,10,0,.35),rgba(8,2,0,.85))}
+.dead p{color:var(--dust)}
+.edge{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:3px;font:500 11.5px var(--f-mono);color:var(--dust);pointer-events:auto;cursor:pointer;padding:8px;text-shadow:0 1px 6px #000;white-space:nowrap;will-change:transform}
+.edge i{display:block;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid currentColor;filter:drop-shadow(0 1px 4px #000)}
+.edge.sun{color:var(--sun)}
+.edge.aim{color:var(--ice)}
+@media (max-width:640px){.ctl{gap:6px}.ctl .btn{padding:0 13px;font-size:14px}}
