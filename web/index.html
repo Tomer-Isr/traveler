@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Путешественник — Солнечная система на шаттле</title>
+<meta name="description" content="Летай на шаттле по Солнечной системе: настоящие расстояния, подробные планеты по картам NASA, планеты на сегодняшних местах.">
+<meta name="theme-color" content="#04050c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="labels"></div>
+
+<div class="hud" id="hud" hidden>
+  <div class="h-row">
+    <div class="h-stat"><span data-i18n="speed"></span><b id="hSpeed">—</b></div>
+    <div class="h-stat"><span id="hNearK"></span><b id="hAlt">—</b></div>
+  </div>
+  <div class="h-auto" id="hAuto" hidden><span id="hAutoT"></span> <button type="button" id="hAutoX" data-i18n="cancel"></button></div>
+</div>
+<div class="langs" id="langs"></div>
+
+<div class="ctl" id="ctl" hidden>
+  <button type="button" class="btn" id="bWhere" data-i18n="where"></button>
+  <button type="button" class="btn ghost" id="bStop" data-i18n="stop"></button>
+</div>
+<div class="throttle" id="throttle" hidden><span data-i18n="thrust"></span><div class="th-track" id="thTrack"><i id="thFill"></i><b id="thKnob"></b></div></div>
+<div class="stick" id="stick" hidden><i id="stickKnob"></i></div>
+
+<div class="card" id="card" hidden>
+  <h2 id="cName"></h2>
+  <dl id="cFacts"></dl>
+  <p id="cFact"></p>
+</div>
+
+<div class="menu" id="menu" hidden>
+  <div class="menu-in">
+    <h2 data-i18n="where"></h2>
+    <div class="menu-list" id="menuList"></div>
+  </div>
+</div>
+
+<div class="intro" id="intro">
+  <div class="intro-in">
+    <h1 data-i18n="introH"></h1>
+    <p data-i18n="introP"></p>
+    <p class="how" id="introHow"></p>
+    <p class="how" data-i18n="introAuto"></p>
+    <button type="button" class="btn" id="bGo" data-i18n="go"></button>
+    <p class="credits" data-i18n="credits"></p>
+  </div>
+</div>
+
+<script type="module" src="/main.js"></script>
+</body>
+</html>
