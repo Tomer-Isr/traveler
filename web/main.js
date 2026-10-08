@@ -225,7 +225,7 @@ const ship = new THREE.Group(); scene.add(ship);
 })();
 
 /* ================= flight state ================= */
-const st = { pos: V(), quat: new THREE.Quaternion(), vel: V(), thr: 0, auto: null, aim: null, yaw: 0, pitch: 0, roll: 0, hull: 1, dead: false };
+const st = { brake: false, pos: V(), quat: new THREE.Quaternion(), vel: V(), thr: 0, auto: null, aim: null, yaw: 0, pitch: 0, roll: 0, hull: 1, dead: false };
 const camQ = new THREE.Quaternion();
 placeBodies(Date.now());
 function startNearEarth() {
@@ -267,7 +267,7 @@ function flyStep(dt) {
   }
   fwd.set(0, 0, -1).applyQuaternion(st.quat);
   tmp.copy(fwd).multiplyScalar(st.thr * vmax);
-  st.vel.lerp(tmp, 1 - Math.exp(-dt * 3));
+  st.vel.lerp(tmp, 1 - Math.exp(-dt * (st.brake ? 7 : 3)));
   st.pos.addScaledVector(st.vel, dt);
   // never sink into a body: stay a little above the surface (or the Sun's)
   for (const b of ALL) {
@@ -438,17 +438,28 @@ track.addEventListener('pointerdown', e => { thDrag = true; track.setPointerCapt
 track.addEventListener('pointermove', e => thDrag && setFromY(e.clientY));
 track.addEventListener('pointerup', () => thDrag = false); track.addEventListener('pointercancel', () => thDrag = false);
 function setThrUi() { const h = track.clientHeight; $('thFill').style.height = (st.thr * 100) + '%'; $('thKnob').style.bottom = Math.max(0, st.thr * h - 3) + 'px'; }
+// gas and brake straight ahead: hold to change speed, the course stays
+let holdGas = false, holdBrake = false;
+for (const [id, set] of [['bGas', v => holdGas = v], ['bBrake', v => holdBrake = v]]) {
+  const b = $(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch (er) {} set(true); b.classList.add('on'); if (st.auto) { st.auto = null; updateAutoUi(); } });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => { set(false); b.classList.remove('on'); });
+  b.addEventListener('contextmenu', e => e.preventDefault());
+}
 canvas.addEventListener('wheel', e => { e.preventDefault(); st.thr = clamp(st.thr - e.deltaY * .0008, 0, 1); if (st.auto) { st.auto = null; updateAutoUi(); } }, { passive: false });
 const keys = new Set();
 addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; keys.add(e.code); if (e.code === 'Space') { st.thr = 0; st.auto = null; updateAutoUi(); e.preventDefault(); } if (e.code === 'Escape') $('menu').hidden = true; });
 addEventListener('keyup', e => keys.delete(e.code));
 function keyInput(dt) {
   const k = c => keys.has(c);
-  if (k('KeyW') || k('ShiftLeft')) st.thr = clamp(st.thr + dt * .5, 0, 1);
-  if (k('KeyS') || k('ControlLeft')) st.thr = clamp(st.thr - dt * .7, 0, 1);
-  const kb = k('ArrowLeft') || k('ArrowRight') || k('ArrowUp') || k('ArrowDown') || k('KeyA') || k('KeyD') || k('KeyQ') || k('KeyE');
+  const gas = holdGas || k('KeyW') || k('ArrowUp') || k('ShiftLeft'), brk = holdBrake || k('KeyS') || k('ArrowDown') || k('ControlLeft');
+  if ((gas || brk) && st.auto) { st.auto = null; updateAutoUi(); }
+  if (gas) st.thr = clamp(st.thr + dt * .55, 0, 1);
+  if (brk) st.thr = clamp(st.thr - dt * 1.4, 0, 1);
+  st.brake = brk;
+  const kb = k('ArrowLeft') || k('ArrowRight') || k('KeyA') || k('KeyD') || k('KeyQ') || k('KeyE');
   if (kb) { st.aim = null; if (st.auto) { st.auto = null; updateAutoUi(); } }
-  if (!sp) { st.yaw = (k('ArrowLeft') ? 1 : 0) - (k('ArrowRight') ? 1 : 0); st.pitch = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0); }
+  if (!sp) { st.yaw = (k('ArrowLeft') ? 1 : 0) - (k('ArrowRight') ? 1 : 0); st.pitch = 0; }
   st.roll = ((k('KeyA') || k('KeyQ')) ? 1.2 : 0) - ((k('KeyD') || k('KeyE')) ? 1.2 : 0);
 }
 
