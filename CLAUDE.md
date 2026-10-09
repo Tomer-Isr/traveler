@@ -9,7 +9,12 @@
 - Адрес: https://traveler.tomerisr.org.il · репозиторий `Tomer-Isr/traveler` (публичный)
 - Хостинг: GitHub Pages, деплой = `git push` в `main` (`.github/workflows/pages.yml` публикует `web/`).
   DNS: CNAME `traveler` → `tomer-isr.github.io` в Cloudflare, без прокси.
-- Сервера пока нет. Онлайн и чат потребуют сервис на Railway (см. `PLAN.md`).
+- **Онлайн (с 09.10.2026):** `server/server.js` (Node + `ws`) на Railway — проект `traveler`, сервис `traveler-online`,
+  адрес `wss://fly.tomerisr.org.il/fly` (CNAME в Cloudflare с прокси + TXT `_railway-verify.fly`), деплой = тот же `git push`
+  (Railway собирает корень репо, `package.json` → `npm start`). Комнаты = места: `sol`, `hole`, id звезды; по 24 шаттла,
+  тесно — копия комнаты. Сервер знает только номер-позывной, цвет, место и где корабль; ни имени, ни даты, ни текста.
+  Знаки — четыре (`wave`, `lights`, `fire`, `follow`), не чаще раза в 1,5 с. `GET /stats` — сколько в эфире по местам.
+  Локально: `node server/server.js` (порт 8090), страница на localhost сама идёт на `ws://localhost:8090/fly`; `?net=` — свой адрес.
 
 ## Что читать первым
 - `STATUS.md` — журнал работ
@@ -25,6 +30,9 @@
 - `web/tex/` — карты: 2k (Solar System Scope, CC BY 4.0; Земля — NASA Blue Marble) и 4k,
   которые грузятся только при подлёте (`HIRES` в `main.js`)
 - Чёрная дыра (Стрелец A*) — отдельное пространство `space='hole'`, прыжок `warp()`, трассировка лучей `bhMat`; `?go=hole`, `?lang=`; `__trav.holeAt(k, h)` для проверок
+- Звезда своего света: дата рождения (поле в заставке, хранится только в браузере) или `?star=<id>` с главной →
+  ближайшая по световым годам звезда из `STARS` (тот же список, что на cosmos) — место появления. Гавань у звезды —
+  там, где обшивка ≈ 90 °C, все прибывают в пределах ~400 км друг от друга, чтобы встречаться
 - `window.__trav.look(id, k)` — поставить корабль в k радиусах от тела лицом к нему (для проверок)
 
 ## Правила
