@@ -79,3 +79,17 @@ button{font:inherit;color:inherit}
 .tbtn.on{background:var(--sun);border-color:var(--sun);color:#1a1006}
 #bBrake.on{background:var(--ice);border-color:var(--ice)}
 .throttle{gap:8px}
+/* back to the main site */
+.home{position:fixed;top:calc(52px + env(safe-area-inset-top,0px));right:16px;z-index:5;font:500 12px var(--f-mono);color:var(--dim);text-decoration:none;background:rgba(8,10,26,.7);border:1px solid var(--line);border-radius:99px;padding:6px 12px}
+.home:hover{color:var(--dust);border-color:var(--dim)}
+.intro-home{display:inline-block;margin:6px 0 0 14px;color:var(--dim);font-size:14px}
+/* black hole */
+.h-stat.slow b{color:var(--ice)}
+.menu-list button.jump{border-color:rgba(143,208,255,.45);background:rgba(143,208,255,.07)}
+.menu-list button.jump span{color:var(--ice)}
+.warp{position:fixed;inset:0;z-index:15;display:grid;place-items:center;pointer-events:none;opacity:0;transition:opacity .9s ease;
+  background:radial-gradient(ellipse at center,rgba(220,235,255,.95) 0,rgba(120,150,255,.55) 22%,rgba(10,12,40,.92) 60%,#02030a 100%)}
+.warp.on{opacity:1}
+.warp b{font:700 clamp(18px,4.4vw,30px)/1.2 var(--f-disp);color:#06081a;text-align:center;padding:0 24px;max-width:640px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));width:min(440px,calc(100% - 32px));z-index:8;background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--ice);border-radius:16px;padding:12px 14px;font-size:14px;cursor:pointer}
+@media (max-width:640px){.at-hole .hud .h-row{gap:6px 18px}.at-hole .card{top:calc(158px + env(safe-area-inset-top,0px))}.toast{bottom:auto;top:calc(214px + env(safe-area-inset-top,0px))}}

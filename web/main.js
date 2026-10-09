@@ -12,7 +12,9 @@ let mob = innerWidth < 760;
 
 /* ================= language ================= */
 const LANGS = ['ru', 'en'];
-let lang = ls.get('trav-lang') || ((navigator.language || '').slice(0, 2) === 'ru' ? 'ru' : 'en');
+// ?lang=ru|en|he from the main site; Hebrew lands in English, the home link goes back to /he/
+const QS = new URLSearchParams(location.search), qLang = QS.get('lang');
+let lang = (qLang && (qLang === 'he' ? 'en' : qLang)) || ls.get('trav-lang') || ((navigator.language || '').slice(0, 2) === 'ru' ? 'ru' : 'en');
 if (!LANGS.includes(lang)) lang = 'en';
 let D = I18N[lang];
 const t = (k, v) => { let s = D[k] ?? I18N.ru[k] ?? k; if (v) for (const x in v) s = s.split('{' + x + '}').join(v[x]); return s; };
@@ -186,7 +188,11 @@ const ringMat = new THREE.ShaderMaterial({
 });
 const rings = new THREE.Mesh(new THREE.RingGeometry(ringIn, ringOut, 256, 1), ringMat); rings.rotation.x = -Math.PI / 2; P.saturn.tilt.add(rings);
 const sunBody = { id: 'sun', R: sunR, pos: V(), grp: sun };
-const ALL = [sunBody, P.mercury, P.venus, P.earth, P.moon, P.mars, P.jupiter, P.saturn, P.uranus, P.neptune];
+const SOL = [sunBody, P.mercury, P.venus, P.earth, P.moon, P.mars, P.jupiter, P.saturn, P.uranus, P.neptune];
+// Sagittarius A*, the black hole at the centre of the Galaxy: 4.3 million Suns, horizon radius 12.7 million km.
+// It lives in its own space (we jump there): the hole sits at the origin, its disc lies in the y = 0 plane.
+const RS = 12698, HOLE = { id: 'hole', R: RS, pos: V() };
+let space = 'sol', ALL = SOL;
 
 function placeBodies(now) {
   const days = (now - J2000) / DAY;
@@ -245,7 +251,7 @@ function flyStep(dt) {
   const [nb, alt] = nearest();
   const vmax = clamp(Math.max(alt, 0) * .9, .0004, 6e5);
   if (st.auto) {
-    const tg = st.auto, dist = tg.pos.distanceTo(st.pos), park = tg.R * (tg.id === 'sun' ? 15 : tg.id === 'saturn' ? 4.2 : 3.2), left = dist - park;
+    const tg = st.auto, dist = tg.pos.distanceTo(st.pos), park = tg.R * (tg.id === 'sun' ? 15 : tg.id === 'hole' ? 6 : tg.id === 'saturn' ? 4.2 : 3.2), left = dist - park;
     tmp.subVectors(tg.pos, st.pos).normalize();
     const m = new THREE.Matrix4().lookAt(V(), tmp, tmp2.set(0, 1, 0).applyQuaternion(st.quat)); qd.setFromRotationMatrix(m);
     st.quat.slerp(qd, 1 - Math.exp(-dt * 2.2));
@@ -271,7 +277,7 @@ function flyStep(dt) {
   st.pos.addScaledVector(st.vel, dt);
   // never sink into a body: stay a little above the surface (or the Sun's)
   for (const b of ALL) {
-    const d = st.pos.distanceTo(b.pos), floor = b.R * (b.id === 'sun' ? 1.05 : 1.0015) + SHIP;
+    const d = st.pos.distanceTo(b.pos), floor = b.id === 'hole' ? b.R + HOLE_FLOOR : b.R * (b.id === 'sun' ? 1.05 : 1.0015) + SHIP;
     if (d < floor) { tmp.subVectors(st.pos, b.pos).normalize(); st.pos.copy(b.pos).addScaledVector(tmp, floor); const vr = st.vel.dot(tmp); if (vr < 0) st.vel.addScaledVector(tmp, -vr); }
   }
   return [nb, alt];
@@ -344,10 +350,11 @@ function placeCamera(dt, shake = 0) {
 
 /* ================= labels ================= */
 const labelsEl = $('labels');
-for (const b of ALL) { const el = document.createElement('div'); el.className = 'lbl'; labelsEl.appendChild(el); el.onclick = () => startAuto(b); b.lbl = el; }
+for (const b of [...SOL, HOLE]) { const el = document.createElement('div'); el.className = 'lbl'; labelsEl.appendChild(el); el.onclick = () => startAuto(b); b.lbl = el; }
 const proj = V();
 function distFmt(u) {
   const km = u * 1000;
+  if (km < 1) return `${fmt(Math.max(0, km * 1000), km < .01 ? 1 : 0)} ${t('m')}`;
   if (km < 1e6) return `${fmt(Math.max(0, Math.round(km)))} ${t('km')}`;
   if (km < 1.5e9) return `${fmt(km / 1e6, km < 1e7 ? 1 : 0)} ${t('mlnKm')}`;
   return `${fmt(km / 1.496e8, 1)} ${t('au')}`;
@@ -391,33 +398,131 @@ function showCard(b) {
   if (!b) { $('card').hidden = true; return; }
   const f = D.facts[b.id];
   $('cName').textContent = D.bodies[b.id];
-  $('cFacts').innerHTML = ['fDiam', 'fDay', 'fYear', 'fG', 'fTemp', 'fMoons'].map((k, i) => f[i] && f[i] !== '—' ? `<dt>${t(k)}</dt><dd>${f[i]}</dd>` : '').join('');
-  $('cFact').textContent = f[6]; $('card').hidden = false;
+  const keys = b.id === 'hole' ? ['fHorizon', 'fMass', 'fDist', 'fDisk'] : ['fDiam', 'fDay', 'fYear', 'fG', 'fTemp', 'fMoons'];
+  $('cFacts').innerHTML = keys.map((k, i) => f[i] && f[i] !== '—' ? `<dt>${t(k)}</dt><dd>${f[i]}</dd>` : '').join('');
+  $('cFact').textContent = f[keys.length]; $('card').hidden = false;
 }
 function hud(nb, alt) {
   $('hSpeed').textContent = speedFmt(st.vel.length());
   $('hNearK').textContent = `${t('near')}: ${D.bodies[nb.id]}`;
-  $('hAlt').textContent = `${distFmt(alt)} ${t('alt')}`;
+  $('hAlt').textContent = `${distFmt(alt)} ${t(nb.id === 'hole' ? 'altH' : 'alt')}`;
+  if (space === 'hole') { $('hTime').textContent = spanFmt(3600 * dil()); $('hEarth').textContent = spanFmt(earthSec); }
   $('bAim').textContent = t('aimBtn', { name: D.bodies[nb.id] });
   showCard(alt < nb.R * 4 ? nb : null);
   setThrUi();
 }
 function updateAutoUi() { $('hAuto').hidden = !st.auto; if (st.auto) $('hAutoT').textContent = t('autopilot', { name: D.bodies[st.auto.id] }); }
-function startAuto(b) { st.auto = b; $('menu').hidden = true; updateAutoUi(); }
+function startAuto(b) { $('menu').hidden = true; if (!ALL.includes(b)) { warp(b === HOLE ? 'hole' : 'sol'); return; } st.auto = b; updateAutoUi(); }
 $('hAutoX').onclick = () => { st.auto = null; updateAutoUi(); };
 function buildMenu() {
   $('menuList').innerHTML = '';
-  for (const b of ALL) {
-    const btn = document.createElement('button'); btn.type = 'button';
-    btn.innerHTML = `${D.bodies[b.id]}<span>${distFmt(b.pos.distanceTo(st.pos) - b.R)}</span>`;
-    btn.onclick = () => startAuto(b); $('menuList').appendChild(btn);
-  }
+  const add = (name, sub, fn, cls) => { const btn = document.createElement('button'); btn.type = 'button'; if (cls) btn.className = cls; btn.innerHTML = `${name}<span>${sub}</span>`; btn.onclick = fn; $('menuList').appendChild(btn); };
+  for (const b of ALL) add(D.bodies[b.id], distFmt(b.pos.distanceTo(st.pos) - b.R), () => startAuto(b));
+  if (space === 'sol') add(D.bodies.hole, t('jumpHole'), () => startAuto(HOLE), 'jump');
+  else add(t('home'), t('jumpHome'), () => { $('menu').hidden = true; warp('sol'); }, 'jump');
 }
 $('card').onclick = () => $('card').classList.toggle('open');
 $('bWhere').onclick = () => { buildMenu(); $('menu').hidden = false; };
 $('menu').addEventListener('click', e => { if (e.target.id === 'menu') $('menu').hidden = true; });
 $('bStop').onclick = () => { st.auto = st.aim = null; st.thr = 0; updateAutoUi(); };
 $('bAim').onclick = () => { const [nb] = nearest(); st.aim = nb; st.auto = null; updateAutoUi(); };
+
+/* ================= black hole ================= */
+// You hover on your engines, so your clock runs sqrt(r / (r - rs)) times slower than Earth's.
+const HOLE_FLOOR = 3e-6; // 3 m above the horizon: an hour there is about 7 years on Earth (Miller's planet)
+const dil = () => { if (space !== 'hole') return 1; const r = st.pos.length(), a = Math.max(r - RS, HOLE_FLOOR); return Math.sqrt((RS + a) / a); };
+let earthSec = 0, shipSec = 0;
+const plural = (n, f) => { if (lang !== 'ru') return n === 1 ? f[0] : f[1]; if (n % 1) return f[1]; n = Math.abs(n) % 100; const m = n % 10; return n > 10 && n < 20 ? f[2] : m === 1 ? f[0] : m > 1 && m < 5 ? f[1] : f[2]; };
+function spanFmt(sec) {
+  if (sec < 60) return `${fmt(Math.round(sec))} ${t('uSec')}`;
+  if (sec < 3600) return `${fmt(Math.floor(sec / 60))} ${t('uMin')}`;
+  if (sec < 86400) { const h = Math.floor(sec / 3600), m = Math.floor(sec / 60 % 60); return `${fmt(h)} ${t('uH')}` + (m ? ` ${fmt(m)} ${t('uMin')}` : ''); }
+  const d = sec / 86400;
+  if (d < 365.25) { const n = Math.floor(d); return `${fmt(n)} ${plural(n, D.uDay)}`; }
+  const y = d / 365.25, n = y < 10 ? Math.floor(y * 10) / 10 : Math.round(y);
+  return `${fmt(n, n % 1 ? 1 : 0)} ${plural(n, D.uYear)}`;
+}
+const qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quad = new THREE.PlaneGeometry(2, 2);
+const bhRT = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: false, stencilBuffer: false });
+// full-screen ray tracing in Schwarzschild geometry (rs = 1): photons bend as d²x/dt² = -1.5 h² x / r⁵;
+// rays that never come within 40 rs only get the weak-field deflection 2 rs / b
+const bhMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uRo: { value: V() }, uRt: { value: V() }, uUp: { value: V() }, uFw: { value: V() }, uTan: { value: 1 }, uAsp: { value: 1 } },
+  vertexShader: `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}`,
+  fragmentShader: `precision highp float;uniform float uTime,uTan,uAsp;uniform vec3 uRo,uRt,uUp,uFw;varying vec2 vUv;
+    float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+    float h31(vec3 p){p=fract(p*.3183099+.1);p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+    float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);}
+    float fb(vec2 p){float s=0.,a=.5;for(int i=0;i<4;i++){s+=a*vn(p);p=p*2.03+17.1;a*=.5;}return s;}
+    vec3 sky(vec3 d){vec3 c=vec3(0.);
+      for(int k=0;k<2;k++){float sc=k==0?90.:220.;vec3 g=d*sc;vec3 i=floor(g);float h=h31(i);
+        if(h>(k==0?.985:.975)){vec3 f=fract(g)-.5;float b=smoothstep(.3,.0,length(f))*(h-.97)*40.;c+=b*mix(vec3(1.,.85,.7),vec3(.75,.85,1.),h31(i+3.));}}
+      float band=exp(-pow(d.y*2.2+.3*d.x,2.)*2.);c+=vec3(.55,.45,.38)*band*(.06+.16*fb(d.xz*6.+d.y*3.));return c;}
+    vec3 diskCol(vec3 p,vec3 dir,float r){
+      float t=pow(1./r,.75)*pow(max(1.-sqrt(3./r),0.),.25)*2.1;
+      float w=pow(r,-1.5)*.9;float a=-w*uTime;vec2 q=mat2(cos(a),-sin(a),sin(a),cos(a))*p.xz;
+      float n=.3+.85*fb(vec2(r*2.6+2.2*fb(q*.6),fb(q*1.1)*2.5))*smoothstep(.15,.6,fb(q*2.3+r));
+      vec3 v=normalize(vec3(-p.z,0.,p.x))*sqrt(.5/r);float b=length(v);
+      float D=1./((1./sqrt(1.-b*b))*(1.-dot(v,-normalize(dir))));float gr=sqrt(1.-1./r);
+      float I=t*pow(D*gr,3.)*n;
+      vec3 hot=vec3(1.,.95,.86),warm=vec3(1.,.48,.12);vec3 c=mix(warm,hot,clamp(I*.9,0.,1.));
+      return c*I*4.2;}
+    void main(){
+      vec2 uv=vUv*2.-1.;
+      vec3 dir=normalize(uFw+uv.x*uTan*uAsp*uRt+uv.y*uTan*uUp);
+      vec3 pos=uRo;vec3 col=vec3(0.);float al=0.;bool hole=false,march=true;
+      const float RIN=40.;
+      if(length(pos)>RIN){
+        float tca=-dot(pos,dir);vec3 cp=pos+dir*tca;float b=length(cp);
+        if(tca<0.||b>RIN){if(tca>0.)dir=normalize(dir-cp/b*2./b);march=false;}
+        else pos=cp-dir*sqrt(RIN*RIN-b*b);
+      }
+      if(march){vec3 h=cross(pos,dir);float h2=dot(h,h);
+        for(int i=0;i<${mob ? 220 : 360};i++){
+          float r2=dot(pos,pos);float r=sqrt(r2);
+          if(r<1.){hole=true;break;}
+          float dt=r<16.?clamp(.045*r,.012,.7):.09*r;
+          vec3 acc=-1.5*h2*pos/(r2*r2*r);
+          vec3 np=pos+dir*dt;dir+=acc*dt;
+          if(pos.y*np.y<0.){vec3 p=mix(pos,np,pos.y/(pos.y-np.y));float rr=length(p.xz);
+            if(rr>3.&&rr<13.){float e=smoothstep(3.,3.25,rr)*(1.-smoothstep(8.,13.,rr));float a=clamp(e*.92,0.,1.);
+              col+=(1.-al)*a*diskCol(p,dir,rr);al+=(1.-al)*a;if(al>.98)break;}}
+          pos=np;if(r>RIN+2.&&dot(pos,dir)>0.)break;}}
+      if(!hole)col+=(1.-al)*sky(normalize(dir));
+      col=1.-exp(-col*1.4);gl_FragColor=vec4(pow(col,vec3(.9)),1.);}`,
+});
+const bhScene = new THREE.Scene(), bhQuad = new THREE.Mesh(quad, bhMat); bhQuad.frustumCulled = false; bhScene.add(bhQuad);
+const outScene = new THREE.Scene(), outQuad = new THREE.Mesh(quad, new THREE.MeshBasicMaterial({ map: bhRT.texture, depthTest: false, depthWrite: false })); outQuad.frustumCulled = false; outScene.add(outQuad);
+function sizeBH() { const k = PR * (mob ? .45 : .7); bhRT.setSize(Math.max(4, Math.round(innerWidth * k)), Math.max(4, Math.round(innerHeight * k))); }
+sizeBH();
+const solObjs = [sun, sunGlow, sunStar, sky, ...bodies.map(b => b.grp)];
+function setSpace(to) {
+  space = to; ALL = to === 'hole' ? [HOLE] : SOL;
+  for (const o of solObjs) o.visible = to === 'sol';
+  for (const b of [...SOL, HOLE]) { b.lbl.style.opacity = 0; b.lbl.style.pointerEvents = 'none'; if (b.edge) b.edge.style.display = 'none'; }
+  st.auto = st.aim = null; st.thr = 0; st.vel.set(0, 0, 0); updateAutoUi(); cardFor = undefined; showCard(null);
+  $('alert').hidden = true; $('heatfx').style.opacity = 0; $('hHullS').hidden = true;
+  $('hTimeS').hidden = $('hEarthS').hidden = to !== 'hole'; document.body.classList.toggle('at-hole', to === 'hole');
+  if (to === 'hole') {
+    // arrive 28 horizon radii out, a little above the disc, looking at the hole
+    st.pos.set(RS * 9, RS * 2.2, RS * 26.5); earthSec = shipSec = 0;
+    st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, V(), V(0, 1, 0))); camQ.copy(st.quat);
+  } else {
+    const mine = shipSec, earth = earthSec; startNearEarth();
+    if (mine > 1) toast(t('backP', { ship: spanFmt(mine), earth: spanFmt(earth) }));
+  }
+}
+let warping = false;
+function warp(to) {
+  if (warping || st.dead) return; warping = true;
+  const w = $('warp'); $('warpT').textContent = t(to === 'hole' ? 'warpHole' : 'warpHome'); w.hidden = false;
+  if (actx) { beep(140, 1.1, .05); beep(70, 1.6, .06); }
+  requestAnimationFrame(() => requestAnimationFrame(() => w.classList.add('on')));
+  setTimeout(() => { setSpace(to); w.classList.remove('on'); setTimeout(() => { w.hidden = true; warping = false; }, 900); }, 1300);
+}
+let toastT = 0;
+function toast(s) { const el = $('toast'); el.textContent = s; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 9000); }
+$('toast').onclick = () => $('toast').hidden = true;
 
 /* ================= controls ================= */
 // steering: press anywhere on the sky and drag — the offset from where you pressed is the stick
@@ -471,10 +576,11 @@ function applyLang(l) {
   $('introHow').textContent = t(touch ? 'introMob' : 'introDesk');
   [...$('langs').children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.l === l)));
   const c = cardFor; cardFor = undefined; showCard(c); updateAutoUi();
+  $('home').href = 'https://cosmos.tomerisr.org.il/' + (qLang === 'he' ? 'he/' : l === 'en' ? 'en/' : '');
 }
 LANGS.forEach(l => { const b = document.createElement('button'); b.type = 'button'; b.dataset.l = l; b.textContent = I18N[l]._name; b.onclick = () => applyLang(l); $('langs').appendChild(b); });
 applyLang(lang);
-$('bGo').onclick = () => { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi(); };
+$('bGo').onclick = () => { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi(); if (QS.get('go') === 'hole') warp('hole'); };
 
 /* ================= loop ================= */
 const uniformsOf = b => b.mesh.material.uniforms;
@@ -484,7 +590,8 @@ function frame(now) {
   placeBodies(Date.now());
   if (!st.dead) keyInput(dt); else { st.yaw = st.pitch = st.roll = 0; st.thr = 0; }
   const [nb, alt] = st.dead ? nearest() : flyStep(dt);
-  const danger = $('hud').hidden ? 0 : heat(dt, now); boomStep(dt);
+  const danger = $('hud').hidden || space === 'hole' ? 0 : heat(dt, now); boomStep(dt);
+  if (space === 'hole' && !$('hud').hidden && !warping) { shipSec += dt; earthSec += dt * dil(); }
   // floating origin: everything relative to the ship
   sun.position.subVectors(sunBody.pos, st.pos); sunGlow.position.copy(sun.position); sunStar.position.copy(sun.position); sunLight.position.copy(sun.position);
   sun.material.uniforms.uTime.value = now / 1000; sun.material.uniforms.uNear.value = 1 - THREE.MathUtils.smoothstep(sun.position.length() / sunR, 1.1, 2.5);
@@ -504,11 +611,20 @@ function frame(now) {
   sky.position.set(0, 0, 0);
   for (const f of ship.userData.flames) { f.scale.set(1, .15 + st.thr * (1 + Math.random() * .25), 1); f.material.opacity = .25 + st.thr * .7; }
   placeCamera(dt, danger);
-  renderer.render(scene, camera);
+  if (space === 'hole') {
+    // the hole is drawn by the ray tracer, the shuttle on top of it, lit from the disc
+    sunLight.position.copy(st.pos).negate();
+    camera.updateMatrixWorld(); const e = camera.matrixWorld.elements, u = bhMat.uniforms;
+    u.uRt.value.set(e[0], e[1], e[2]); u.uUp.value.set(e[4], e[5], e[6]); u.uFw.value.set(-e[8], -e[9], -e[10]);
+    u.uRo.value.copy(st.pos).divideScalar(RS); u.uTime.value = now / 1000;
+    u.uTan.value = Math.tan(camera.fov * Math.PI / 360); u.uAsp.value = camera.aspect;
+    renderer.setRenderTarget(bhRT); renderer.render(bhScene, qcam); renderer.setRenderTarget(null);
+    renderer.render(outScene, qcam); renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, camera); renderer.autoClear = true;
+  } else renderer.render(scene, camera);
   if (!$('hud').hidden) { hud(nb, alt); drawLabels(nb); }
   requestAnimationFrame(frame);
 }
-addEventListener('resize', () => { mob = innerWidth < 760; renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+addEventListener('resize', () => { mob = innerWidth < 760; renderer.setSize(innerWidth, innerHeight, false); sizeBH(); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 requestAnimationFrame(frame);
 // for tests: put the ship at k radii from a body and face it
 function look(id, k = 3, side = .6, up = .25) {
@@ -516,4 +632,6 @@ function look(id, k = 3, side = .6, up = .25) {
   st.pos.copy(b.pos).addScaledVector(dir, b.R * k).addScaledVector(V(0, 1, 0), b.R * up); st.vel.set(0, 0, 0); st.thr = 0; st.auto = null;
   st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, b.pos.clone().addScaledVector(V(0, 1, 0).cross(dir).normalize(), b.R * .35), V(0, 1, 0))); camQ.copy(st.quat);
 }
-window.__trav = { st, P, ALL, startAuto, look };
+// at the hole: put the ship k horizon radii out, h radii above the disc, facing the hole (r = 1 + x)
+function holeAt(k = 20, h = 1.5) { st.pos.set(0, RS * h, RS * k); st.vel.set(0, 0, 0); st.thr = 0; st.auto = null; st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, V(), V(0, 1, 0))); camQ.copy(st.quat); }
+window.__trav = { st, P, get ALL() { return ALL; }, startAuto, look, warp, setSpace, holeAt, dil };

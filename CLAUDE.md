@@ -24,6 +24,7 @@
 - `web/i18n.js` — все тексты и факты (NASA Planetary Fact Sheet), ru/en
 - `web/tex/` — карты: 2k (Solar System Scope, CC BY 4.0; Земля — NASA Blue Marble) и 4k,
   которые грузятся только при подлёте (`HIRES` в `main.js`)
+- Чёрная дыра (Стрелец A*) — отдельное пространство `space='hole'`, прыжок `warp()`, трассировка лучей `bhMat`; `?go=hole`, `?lang=`; `__trav.holeAt(k, h)` для проверок
 - `window.__trav.look(id, k)` — поставить корабль в k радиусах от тела лицом к нему (для проверок)
 
 ## Правила

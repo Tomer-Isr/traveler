@@ -24,10 +24,15 @@
     <div class="h-stat"><span data-i18n="speed"></span><b id="hSpeed">—</b></div>
     <div class="h-stat"><span id="hNearK"></span><b id="hAlt">—</b></div>
     <div class="h-stat hot" id="hHullS" hidden><span data-i18n="hull"></span><b id="hHull">—</b></div>
+    <div class="h-stat slow" id="hTimeS" hidden><span data-i18n="hourHere"></span><b id="hTime">—</b></div>
+    <div class="h-stat slow" id="hEarthS" hidden><span data-i18n="earthPassed"></span><b id="hEarth">—</b></div>
   </div>
   <div class="h-auto" id="hAuto" hidden><span id="hAutoT"></span> <button type="button" id="hAutoX" data-i18n="cancel"></button></div>
 </div>
 <div class="langs" id="langs"></div>
+<a class="home" id="home" href="https://cosmos.tomerisr.org.il/" data-i18n="toMain"></a>
+<div class="warp" id="warp" hidden><b id="warpT"></b></div>
+<div class="toast" id="toast" hidden></div>
 
 <div class="ctl" id="ctl" hidden>
   <button type="button" class="btn" id="bWhere" data-i18n="where"></button>
@@ -69,6 +74,7 @@
     <p class="how" id="introHow"></p>
     <p class="how" data-i18n="introAuto"></p>
     <button type="button" class="btn" id="bGo" data-i18n="go"></button>
+    <a class="intro-home" href="https://cosmos.tomerisr.org.il/" data-i18n="toMainIntro" onclick="this.href=document.getElementById('home').href"></a>
     <p class="credits" data-i18n="credits"></p>
   </div>
 </div>
