@@ -25,6 +25,7 @@
     <div class="h-stat"><span id="hNearK"></span><b id="hAlt">—</b></div>
     <div class="h-stat hot" id="hHullS" hidden><span data-i18n="hull"></span><b id="hHull">—</b></div>
     <div class="h-stat slow" id="hTimeS" hidden><span data-i18n="hourHere"></span><b id="hTime">—</b></div>
+    <div class="h-stat net" id="hNetS" hidden><span data-i18n="online"></span><b id="hNet">—</b></div>
     <div class="h-stat slow" id="hEarthS" hidden><span data-i18n="earthPassed"></span><b id="hEarth">—</b></div>
   </div>
   <div class="h-auto" id="hAuto" hidden><span id="hAutoT"></span> <button type="button" id="hAutoX" data-i18n="cancel"></button></div>
@@ -43,6 +44,15 @@
   <button type="button" class="tbtn" id="bGas"><i>▲</i><span data-i18n="gas"></span></button>
   <div class="th-track" id="thTrack"><i id="thFill"></i><b id="thKnob"></b></div>
   <button type="button" class="tbtn" id="bBrake"><i>▼</i><span data-i18n="brake"></span></button>
+</div>
+<div class="signs" id="signs" hidden>
+  <span id="signTo"></span>
+  <div class="sign-row">
+    <button type="button" id="sWave"><i>〰</i><span data-i18n="sWave"></span></button>
+    <button type="button" id="sLights"><i>✳</i><span data-i18n="sLights"></span></button>
+    <button type="button" id="sFire"><i>✺</i><span data-i18n="sFire"></span></button>
+    <button type="button" id="sFollow"><i>➜</i><span data-i18n="sFollow"></span></button>
+  </div>
 </div>
 <div class="stick" id="stick" hidden><i id="stickKnob"></i></div>
 
@@ -73,6 +83,8 @@
     <p data-i18n="introP"></p>
     <p class="how" id="introHow"></p>
     <p class="how" data-i18n="introAuto"></p>
+    <label class="bday" id="bday"><span data-i18n="bdayL"></span><input type="date" id="bdate" min="1900-01-01"></label>
+    <p class="star-hint" id="starHint"></p>
     <button type="button" class="btn" id="bGo" data-i18n="go"></button>
     <a class="intro-home" href="https://cosmos.tomerisr.org.il/" data-i18n="toMainIntro" onclick="this.href=document.getElementById('home').href"></a>
     <p class="credits" data-i18n="credits"></p>

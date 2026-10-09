@@ -1,0 +1,9 @@
+{
+  "name": "traveler-online",
+  "private": true,
+  "description": "Путешественник: сервер онлайна (кто летает у той же звезды); страница — web/ на GitHub Pages",
+  "main": "server/server.js",
+  "scripts": { "start": "node server/server.js" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "ws": "^8.22.0" }
+}

@@ -78,12 +78,12 @@ sky.rotation.set(1.05, 0, .4); sky.renderOrder = -1; scene.add(sky);
 /* ================= Sun ================= */
 const sunR = 696.34;
 const sun = new THREE.Mesh(new THREE.SphereGeometry(sunR, 96, 64), new THREE.ShaderMaterial({
-  uniforms: { uTime: { value: 0 }, uNear: { value: 0 } },
+  uniforms: { uTime: { value: 0 }, uNear: { value: 0 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTintK: { value: 0 } },
   vertexShader: LDV[0] + `varying vec3 vP;varying vec3 vN;varying vec3 vV;void main(){vP=position/${sunR.toFixed(2)};vN=normalize(normalMatrix*normal);vec4 mv=modelViewMatrix*vec4(position,1.);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;` + LDV[1] + `}`,
-  fragmentShader: NOISE + LDF[0] + `uniform float uTime,uNear;varying vec3 vP;varying vec3 vN;varying vec3 vV;
+  fragmentShader: NOISE + LDF[0] + `uniform float uTime,uNear,uTintK;uniform vec3 uTint;varying vec3 vP;varying vec3 vN;varying vec3 vV;
     void main(){` + LDF[1] + `vec3 p=normalize(vP);float n=fbm(p*2.2+vec3(0.,uTime*.02,uTime*.01));float g=snoise(p*18.+uTime*.08);float gr=snoise(p*90.+uTime*.2);
     float v=n*.75+g*.18+gr*.07;if(uNear>.01){float c=1.-abs(snoise(p*700.+uTime*.3));v+=(c*c-.5)*.35*uNear+snoise(p*2600.)*.08*uNear;}vec3 col=mix(vec3(1.,.36,.04),vec3(1.,.84,.45),smoothstep(-.35,.45,v));col+=vec3(1.,.96,.82)*pow(max(v,0.),2.)*.9;
-    float mu=max(dot(vN,vV),0.);col*=.5+.5*pow(mu,.42);col+=vec3(1.,.6,.2)*pow(1.-mu,3.)*.5;gl_FragColor=vec4(col*1.3,1.);}`,
+    float mu=max(dot(vN,vV),0.);col*=.5+.5*pow(mu,.42);col+=vec3(1.,.6,.2)*pow(1.-mu,3.)*.5;col=mix(col,uTint*dot(col,vec3(.3,.45,.25))*1.6,uTintK);gl_FragColor=vec4(col*1.3,1.);}`,
 }));
 scene.add(sun);
 function glowTex(stops) {
@@ -192,6 +192,28 @@ const SOL = [sunBody, P.mercury, P.venus, P.earth, P.moon, P.mars, P.jupiter, P.
 // Sagittarius A*, the black hole at the centre of the Galaxy: 4.3 million Suns, horizon radius 12.7 million km.
 // It lives in its own space (we jump there): the hole sits at the origin, its disc lies in the y = 0 plane.
 const RS = 12698, HOLE = { id: 'hole', R: RS, pos: V() };
+// Stars of the birth years (the same list as on «Ты — пассажир»): the star whose light has been flying to Earth for
+// as long as you have lived. Each one is a place of its own; your star-age peers fly there.
+// id, distance (ly), spectral class, radius (Suns), surface temperature (K), colour
+const STARS = [
+  ['alphaCen', 4.37, 'G2V', 1.22, 5790, [255, 226, 170]], ['barnard', 5.96, 'M4V', .196, 3134, [255, 150, 110]],
+  ['sirius', 8.6, 'A1V', 1.71, 9940, [200, 220, 255]], ['epsEri', 10.5, 'K2V', .735, 5084, [255, 200, 140]],
+  ['procyon', 11.46, 'F5IV', 2.05, 6530, [245, 240, 230]], ['tauCet', 11.9, 'G8V', .79, 5344, [255, 220, 160]],
+  ['altair', 16.7, 'A7V', 1.8, 7550, [220, 230, 255]], ['etaCas', 19.4, 'G0V', 1.04, 5973, [255, 230, 180]],
+  ['vega', 25, 'A0V', 2.5, 9600, [190, 210, 255]], ['fomalhaut', 25.1, 'A3V', 1.84, 8590, [205, 220, 255]],
+  ['pollux', 33.8, 'K0III', 9.1, 4586, [255, 190, 120]], ['arcturus', 36.7, 'K1.5III', 25.4, 4286, [255, 175, 100]],
+  ['capella', 42.9, 'G3III', 12, 4970, [255, 225, 160]], ['alderamin', 49, 'A8V', 2.3, 7740, [225, 232, 255]],
+  ['castor', 51, 'A1V', 2.4, 10300, [205, 220, 255]], ['menkent', 58.8, 'K0III', 10.9, 4980, [255, 195, 130]],
+  ['aldebaran', 65.3, 'K5III', 44, 3900, [255, 160, 90]], ['hamal', 66, 'K2III', 14.9, 4480, [255, 185, 120]],
+  ['alphecca', 75, 'A1IV', 3, 9700, [210, 225, 255]], ['regulus', 79.3, 'B8IV', 4.2, 12460, [185, 205, 255]],
+  ['merak', 79.7, 'A1V', 3, 9380, [210, 225, 255]], ['alcor', 81.7, 'A5V', 1.8, 8000, [220, 230, 255]],
+  ['denebKaitos', 96.3, 'K0III', 16.8, 4800, [255, 195, 130]],
+];
+const starById = id => STARS.find(s => s[0] === id);
+// age in years -> the star whose distance in light years is closest; younger than ~2 years — still the Sun
+const starForAge = y => { const s = STARS.reduce((b, x) => Math.abs(x[1] - y) < Math.abs(b[1] - y) ? x : b); return Math.abs(s[1] - y) < y ? s : null; };
+const STARB = { id: 'star', R: sunR, pos: V(), grp: sun, T: 5772 };
+let curStar = null;
 let space = 'sol', ALL = SOL;
 
 function placeBodies(now) {
@@ -226,7 +248,7 @@ const ship = new THREE.Group(); scene.add(ship);
     const fl = new THREE.Mesh(new THREE.ConeGeometry(.75, 6, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xffc27a, transparent: true, opacity: .85, blending: THREE.AdditiveBlending, depthWrite: false }));
     fl.rotation.x = Math.PI / 2; fl.position.set(x, y, 20.5); g.add(fl); flames.push(fl);
   }
-  g.scale.setScalar(SHIP / 37); ship.add(g); ship.userData.flames = flames;
+  g.scale.setScalar(SHIP / 37); ship.add(g); ship.userData.flames = flames; ship.userData.model = g;
   const shipLight = new THREE.PointLight(0x9fb4ff, .6, SHIP * 6, 2); shipLight.position.set(0, SHIP * .8, -SHIP * .2); ship.add(shipLight);
 })();
 
@@ -238,7 +260,17 @@ function startNearEarth() {
   const e = P.earth.pos, toSun = e.clone().negate().normalize(), side = V(0, 1, 0).cross(toSun).normalize();
   st.pos.copy(e).addScaledVector(toSun.clone().applyAxisAngle(V(0, 1, 0), .9), P.earth.R * 3.4).addScaledVector(V(0, 1, 0), P.earth.R * .5);
   const m = new THREE.Matrix4().lookAt(st.pos, e.clone().addScaledVector(side, P.earth.R * 1.3), V(0, 1, 0)); st.quat.setFromRotationMatrix(m);
-  camQ.copy(st.quat); st.vel.set(0, 0, 0); st.thr = 0; st.auto = st.aim = null; st.hull = 1; st.dead = false;
+  camQ.copy(st.quat); st.vel.set(0, 0, 0); st.thr = 0; st.auto = st.aim = null; st.hull = 1; st.dead = false; jitter();
+}
+// a random spot within ~400 km of the harbour, so arrivals don't sit inside each other but still see each other
+function jitter() { st.pos.add(V(Math.random() - .5, Math.random() - .5, Math.random() - .5).multiplyScalar(.8)); }
+// at a star: the harbour is where the hull sits at about 90 °C, on a direction fixed for that star
+function startAtStar() {
+  const s = curStar, d = STARB.R * Math.max(25, .5 * (s[4] / 365) ** 2), a = [...s[0]].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7) % 628 / 100;
+  const dir = V(Math.cos(a), .12, Math.sin(a)).normalize(), side = V(0, 1, 0).cross(dir).normalize();
+  st.pos.copy(dir).multiplyScalar(d);
+  st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, V().addScaledVector(side, d * .35), V(0, 1, 0))); camQ.copy(st.quat);
+  st.vel.set(0, 0, 0); st.thr = 0; st.auto = st.aim = null; st.hull = 1; st.dead = false; jitter();
 }
 startNearEarth();
 const fwd = V(), tmp = V(), tmp2 = V(), qd = new THREE.Quaternion(), eul = new THREE.Euler();
@@ -249,9 +281,10 @@ function nearest() {
 }
 function flyStep(dt) {
   const [nb, alt] = nearest();
-  const vmax = clamp(Math.max(alt, 0) * .9, .0004, 6e5);
+  let vmax = clamp(Math.max(alt, 0) * .9, .0004, 6e5);
+  const os = nearestOther(); if (os && os[1] < alt) vmax = Math.min(vmax, Math.max(os[1] * .9, .02));
   if (st.auto) {
-    const tg = st.auto, dist = tg.pos.distanceTo(st.pos), park = tg.R * (tg.id === 'sun' ? 15 : tg.id === 'hole' ? 6 : tg.id === 'saturn' ? 4.2 : 3.2), left = dist - park;
+    const tg = st.auto, dist = tg.pos.distanceTo(st.pos), park = tg.R * (tg.id === 'sun' || tg.id === 'star' ? Math.max(15, .5 * ((tg.T || 5772) / 1000) ** 2) : tg.id === 'hole' ? 6 : tg.id === 'ship' ? 3 : tg.id === 'saturn' ? 4.2 : 3.2), left = dist - park;
     tmp.subVectors(tg.pos, st.pos).normalize();
     const m = new THREE.Matrix4().lookAt(V(), tmp, tmp2.set(0, 1, 0).applyQuaternion(st.quat)); qd.setFromRotationMatrix(m);
     st.quat.slerp(qd, 1 - Math.exp(-dt * 2.2));
@@ -287,7 +320,8 @@ function flyStep(dt) {
 // equilibrium temperature of a body in sunlight: T = 5772 K * sqrt(R_sun / 2d). 5 °C at Earth's distance.
 // The shuttle's leading edges (reinforced carbon-carbon) survive about 1 600 °C.
 const MELT = 1600;
-const hullTemp = () => 5772 * Math.sqrt(sunR / (2 * Math.max(st.pos.distanceTo(sunBody.pos), sunR))) - 273;
+const heatBody = () => curStar ? STARB : sunBody;
+const hullTemp = () => { const b = heatBody(); return (curStar ? curStar[4] : 5772) * Math.sqrt(b.R / (2 * Math.max(st.pos.distanceTo(b.pos), b.R))) - 273; };
 let actx = null, lastBeep = 0;
 function beep(f, len = .12, vol = .08) {
   if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = 'square'; o.frequency.value = f;
@@ -325,7 +359,7 @@ function explode(T) {
   boom.visible = true; boomT = 0; ship.visible = false;
   const f = $('flash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = ''; f.style.opacity = 0; });
   if (actx) { beep(90, 1.4, .25); beep(55, 2, .2); }
-  const d = st.pos.distanceTo(sunBody.pos) - sunR;
+  const d = st.pos.distanceTo(heatBody().pos) - heatBody().R;
   $('deadP').textContent = t('deadP', { d: distFmt(d), t: `${fmt(Math.round(T))} °C` });
   setTimeout(() => { $('dead').hidden = false; }, 1700);
 }
@@ -335,7 +369,7 @@ function boomStep(dt) {
   boom.material.opacity = Math.max(0, 1 - boomT / 3.5); boomGeo.attributes.position.needsUpdate = true;
   if (boomT > 3.6) boom.visible = false;
 }
-$('bRespawn').onclick = () => { $('dead').hidden = true; boom.visible = false; ship.visible = true; startNearEarth(); };
+$('bRespawn').onclick = () => { $('dead').hidden = true; boom.visible = false; ship.visible = true; if (curStar) startAtStar(); else startNearEarth(); };
 
 /* ================= camera ================= */
 const camOff = V(0, SHIP * .55, SHIP * 3.3), camLook = V(0, SHIP * .5, -SHIP * 2);
@@ -350,8 +384,9 @@ function placeCamera(dt, shake = 0) {
 
 /* ================= labels ================= */
 const labelsEl = $('labels');
-for (const b of [...SOL, HOLE]) { const el = document.createElement('div'); el.className = 'lbl'; labelsEl.appendChild(el); el.onclick = () => startAuto(b); b.lbl = el; }
+for (const b of [...SOL, HOLE, STARB]) { const el = document.createElement('div'); el.className = 'lbl'; labelsEl.appendChild(el); el.onclick = () => startAuto(b); b.lbl = el; }
 const proj = V();
+const bodyName = b => b.id === 'star' ? D.stars[curStar[0]][0] : b.id === 'ship' ? t('shipN', { n: b.n }) : D.bodies[b.id];
 function distFmt(u) {
   const km = u * 1000;
   if (km < 1) return `${fmt(Math.max(0, km * 1000), km < .01 ? 1 : 0)} ${t('m')}`;
@@ -370,7 +405,7 @@ function edgeMark(b, show) {
   const k = Math.min(W2 / Math.max(Math.abs(dx), 1e-6), (dy < 0 ? Ht : Hb) / Math.max(Math.abs(dy), 1e-6));
   el.style.display = ''; el.style.transform = `translate(${innerWidth / 2 + dx * k}px,${innerHeight / 2 + dy * k}px) translate(-50%,-50%)`;
   el.firstChild.style.transform = `rotate(${Math.atan2(dy, dx) + Math.PI / 2}rad)`;
-  el.lastChild.textContent = D.bodies[b.id]; el.classList.toggle('aim', st.aim === b);
+  el.lastChild.textContent = bodyName(b); el.classList.toggle('aim', st.aim === b);
 }
 function drawLabels(nb) {
   // which off-screen bodies get an arrow at the edge: the Sun, the autopilot target, the two nearest
@@ -384,7 +419,7 @@ function drawLabels(nb) {
     const big = b.R / Math.max(d, 1e-6) > .35;
     if (proj.z > 1 || big || !onScreen || st.dead) { el.style.opacity = 0; el.style.pointerEvents = 'none'; continue; }
     el.style.opacity = 1; el.style.pointerEvents = 'auto';
-    el.textContent = `${D.bodies[b.id]} · ${distFmt(d)}`;
+    el.textContent = `${bodyName(b)} · ${distFmt(d)}`;
     el.classList.toggle('target', st.auto === b);
     el.style.transform = `translate(${(proj.x * .5 + .5) * innerWidth + 10}px,${(-proj.y * .5 + .5) * innerHeight - 12}px)`;
   }
@@ -396,30 +431,36 @@ let cardFor = null;
 function showCard(b) {
   if (cardFor === b) return; cardFor = b;
   if (!b) { $('card').hidden = true; return; }
-  const f = D.facts[b.id];
-  $('cName').textContent = D.bodies[b.id];
-  const keys = b.id === 'hole' ? ['fHorizon', 'fMass', 'fDist', 'fDisk'] : ['fDiam', 'fDay', 'fYear', 'fG', 'fTemp', 'fMoons'];
+  let f = D.facts[b.id];
+  if (b.id === 'star') { const s = curStar; f = [s[2], t('lyN', { n: fmt(s[1], 1) }), t('radN', { n: fmt(s[3], s[3] < 10 ? 2 : 0) }), `${fmt(s[4])} K`,
+    `${D.stars[s[0]][1][0].toUpperCase() + D.stars[s[0]][1].slice(1)}. ` + t('starLight', { n: `${fmt(s[1], 1)} ${plural(Math.round(s[1]), D.uYear)}` })]; }
+  $('cName').textContent = bodyName(b);
+  const keys = b.id === 'star' ? ['fType', 'fDist', 'fRad', 'fTemp'] : b.id === 'hole' ? ['fHorizon', 'fMass', 'fDist', 'fDisk'] : ['fDiam', 'fDay', 'fYear', 'fG', 'fTemp', 'fMoons'];
   $('cFacts').innerHTML = keys.map((k, i) => f[i] && f[i] !== '—' ? `<dt>${t(k)}</dt><dd>${f[i]}</dd>` : '').join('');
   $('cFact').textContent = f[keys.length]; $('card').hidden = false;
 }
 function hud(nb, alt) {
   $('hSpeed').textContent = speedFmt(st.vel.length());
-  $('hNearK').textContent = `${t('near')}: ${D.bodies[nb.id]}`;
+  $('hNearK').textContent = `${t('near')}: ${bodyName(nb)}`;
   $('hAlt').textContent = `${distFmt(alt)} ${t(nb.id === 'hole' ? 'altH' : 'alt')}`;
   if (space === 'hole') { $('hTime').textContent = spanFmt(3600 * dil()); $('hEarth').textContent = spanFmt(earthSec); }
-  $('bAim').textContent = t('aimBtn', { name: D.bodies[nb.id] });
+  $('bAim').textContent = t('aimBtn', { name: bodyName(nb) });
   showCard(alt < nb.R * 4 ? nb : null);
   setThrUi();
 }
-function updateAutoUi() { $('hAuto').hidden = !st.auto; if (st.auto) $('hAutoT').textContent = t('autopilot', { name: D.bodies[st.auto.id] }); }
-function startAuto(b) { $('menu').hidden = true; if (!ALL.includes(b)) { warp(b === HOLE ? 'hole' : 'sol'); return; } st.auto = b; updateAutoUi(); }
+function updateAutoUi() { $('hAuto').hidden = !st.auto; if (st.auto) $('hAutoT').textContent = t('autopilot', { name: bodyName(st.auto) }); }
+function startAuto(b) { $('menu').hidden = true; st.auto = b; st.aim = null; updateAutoUi(); }
 $('hAutoX').onclick = () => { st.auto = null; updateAutoUi(); };
 function buildMenu() {
   $('menuList').innerHTML = '';
-  const add = (name, sub, fn, cls) => { const btn = document.createElement('button'); btn.type = 'button'; if (cls) btn.className = cls; btn.innerHTML = `${name}<span>${sub}</span>`; btn.onclick = fn; $('menuList').appendChild(btn); };
-  for (const b of ALL) add(D.bodies[b.id], distFmt(b.pos.distanceTo(st.pos) - b.R), () => startAuto(b));
-  if (space === 'sol') add(D.bodies.hole, t('jumpHole'), () => startAuto(HOLE), 'jump');
-  else add(t('home'), t('jumpHome'), () => { $('menu').hidden = true; warp('sol'); }, 'jump');
+  const add = (name, sub, fn, cls) => { const btn = document.createElement('button'); btn.type = 'button'; if (cls) btn.className = cls; btn.innerHTML = `${name}<span>${sub}</span>`; btn.onclick = () => { $('menu').hidden = true; fn(); }; $('menuList').appendChild(btn); };
+  const head = s => { const h = document.createElement('h3'); h.textContent = s; $('menuList').appendChild(h); };
+  for (const b of ALL) add(bodyName(b), distFmt(b.pos.distanceTo(st.pos) - b.R), () => startAuto(b));
+  const near = [...others.values()].filter(o => o.seen).sort((a, b) => a.pos.distanceToSquared(st.pos) - b.pos.distanceToSquared(st.pos)).slice(0, 6);
+  if (near.length) { head(t('ships')); for (const o of near) add(bodyName(o), distFmt(o.pos.distanceTo(st.pos)), () => startAuto(o), 'ship'); }
+  if (myStar && space !== myStar[0]) add(t('myStar', { name: D.stars[myStar[0]][0] }), t('jumpStar', { ly: fmt(myStar[1], 1) }), () => warp(myStar[0]), 'jump');
+  if (space !== 'sol') add(t('home'), t('jumpHome'), () => warp('sol'), 'jump');
+  if (space !== 'hole') add(D.bodies.hole, t('jumpHole'), () => warp('hole'), 'jump');
 }
 $('card').onclick = () => $('card').classList.toggle('open');
 $('bWhere').onclick = () => { buildMenu(); $('menu').hidden = false; };
@@ -497,32 +538,189 @@ function sizeBH() { const k = PR * (mob ? .45 : .7); bhRT.setSize(Math.max(4, Ma
 sizeBH();
 const solObjs = [sun, sunGlow, sunStar, sky, ...bodies.map(b => b.grp)];
 function setSpace(to) {
-  space = to; ALL = to === 'hole' ? [HOLE] : SOL;
-  for (const o of solObjs) o.visible = to === 'sol';
-  for (const b of [...SOL, HOLE]) { b.lbl.style.opacity = 0; b.lbl.style.pointerEvents = 'none'; if (b.edge) b.edge.style.display = 'none'; }
+  const from = space, star = starById(to) || null;
+  space = to; curStar = star; ALL = to === 'hole' ? [HOLE] : star ? [STARB] : SOL;
+  for (const o of solObjs) o.visible = to !== 'hole';
+  for (const b of bodies) b.grp.visible = to === 'sol';
+  // the star of this place: size, colour and heat
+  const R = star ? sunR * star[3] : sunR, col = star ? new THREE.Color(...star[5].map(v => v / 255)) : new THREE.Color(1, 1, 1);
+  STARB.R = R; STARB.T = star ? star[4] : 5772; sun.scale.setScalar(R / sunR); sunGlow.scale.setScalar(R * 9);
+  sun.material.uniforms.uTint.value.copy(col); sun.material.uniforms.uTintK.value = star ? .8 : 0;
+  sunGlow.material.color.copy(col); sunStar.material.color.copy(col); sunLight.color.set(0xfff4e6).multiply(col);
+  for (const b of [...SOL, HOLE, STARB]) { if (b.lbl) { b.lbl.style.opacity = 0; b.lbl.style.pointerEvents = 'none'; } if (b.edge) b.edge.style.display = 'none'; }
   st.auto = st.aim = null; st.thr = 0; st.vel.set(0, 0, 0); updateAutoUi(); cardFor = undefined; showCard(null);
   $('alert').hidden = true; $('heatfx').style.opacity = 0; $('hHullS').hidden = true;
   $('hTimeS').hidden = $('hEarthS').hidden = to !== 'hole'; document.body.classList.toggle('at-hole', to === 'hole');
   if (to === 'hole') {
     // arrive 28 horizon radii out, a little above the disc, looking at the hole
     st.pos.set(RS * 9, RS * 2.2, RS * 26.5); earthSec = shipSec = 0;
-    st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, V(), V(0, 1, 0))); camQ.copy(st.quat);
-  } else {
-    const mine = shipSec, earth = earthSec; startNearEarth();
-    if (mine > 1) toast(t('backP', { ship: spanFmt(mine), earth: spanFmt(earth) }));
-  }
+    st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, V(), V(0, 1, 0))); camQ.copy(st.quat); jitter();
+  } else if (star) startAtStar();
+  else startNearEarth();
+  if (from === 'hole' && to !== 'hole' && shipSec > 1) toast(t('backP', { ship: spanFmt(shipSec), earth: spanFmt(earthSec) }));
+  netGo();
 }
 let warping = false;
 function warp(to) {
   if (warping || st.dead) return; warping = true;
-  const w = $('warp'); $('warpT').textContent = t(to === 'hole' ? 'warpHole' : 'warpHome'); w.hidden = false;
+  const w = $('warp'), sj = starById(to); $('warpT').textContent = sj ? t('warpStar', { name: D.stars[to][0], ly: fmt(sj[1], 1) }) : t(to === 'hole' ? 'warpHole' : 'warpHome'); w.hidden = false;
   if (actx) { beep(140, 1.1, .05); beep(70, 1.6, .06); }
   requestAnimationFrame(() => requestAnimationFrame(() => w.classList.add('on')));
   setTimeout(() => { setSpace(to); w.classList.remove('on'); setTimeout(() => { w.hidden = true; warping = false; }, 900); }, 1300);
 }
 let toastT = 0;
-function toast(s) { const el = $('toast'); el.textContent = s; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 9000); }
+function toast(s, btn, fn) {
+  const el = $('toast'); el.textContent = s; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, btn ? 12000 : 7000);
+  if (btn) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.textContent = btn; b.onclick = e => { e.stopPropagation(); el.hidden = true; fn(); }; el.appendChild(b); }
+}
 $('toast').onclick = () => $('toast').hidden = true;
+
+/* ================= online: other shuttles in the same place ================= */
+// The server gets only the place (a star id, 'sol' or 'hole') and where your ship is. Never the date or a name.
+const NET = QS.get('net') || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'ws://localhost:8090/fly' : 'wss://fly.tomerisr.org.il/fly');
+const TICK = 200;
+let ws = null, me = null, retry = 0, lastSend = 0, netOn = false;
+const others = new Map();
+const hueCol = h => new THREE.Color().setHSL(h / 360, .85, .62);
+function netGo() { if (ws && ws.readyState === 1 && me) ws.send(JSON.stringify({ t: 'go', space })); for (const id of [...others.keys()]) dropOther(id); }
+function connect() {
+  netOn = true; try { ws = new WebSocket(NET); } catch (e) { return; }
+  ws.onopen = () => { retry = 0; };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch (er) { return; }
+    if (m.t === 'hi') { me = m; netGo(); }
+    else if (m.t === 'room') { for (const o of m.others) addOther(o); }
+    else if (m.t === 'join') addOther(m);
+    else if (m.t === 'leave') dropOther(m.id);
+    else if (m.t === 'sts') for (const a of m.a) { const o = others.get(a[0]); if (o) setState(o, a.slice(1)); }
+    else if (m.t === 'sign') gotSign(m);
+  };
+  ws.onclose = () => { me = null; for (const id of [...others.keys()]) dropOther(id); setTimeout(connect, Math.min(30000, 2000 * ++retry)); };
+}
+function addOther(o) {
+  if (!me || o.id === me.id || others.has(o.id)) return;
+  const col = hueCol(o.hue), grp = new THREE.Group();
+  const model = ship.userData.model.clone(true), flames = [];
+  model.traverse(x => { if (x.isMesh && x.material.blending === THREE.AdditiveBlending) { x.material = x.material.clone(); flames.push(x); } });
+  grp.add(model);
+  // a fixed-size coloured light, so a shuttle is findable from far away; it also blinks for the "lights" sign
+  const dot = new THREE.Sprite(spriteMat(glowTex([[0, 'rgba(255,255,255,1)'], [.3, 'rgba(255,255,255,.4)'], [1, 'rgba(255,255,255,0)']]), { sizeAttenuation: false, color: col }));
+  dot.scale.setScalar(.016); grp.add(dot);
+  grp.visible = false; scene.add(grp);
+  const lbl = document.createElement('div'); lbl.className = 'lbl ship'; lbl.style.color = '#' + col.getHexString(); labelsEl.appendChild(lbl);
+  const b = { id: 'ship', sid: o.id, n: o.n, hue: o.hue, col, R: SHIP, grp, model, dot, flames, lbl, pos: V(), from: V(), to: V(), q: new THREE.Quaternion(), qt: new THREE.Quaternion(), t0: 0, thr: 0, seen: false, fx: {} };
+  lbl.onclick = () => startAuto(b);
+  others.set(o.id, b); if (o.s) setState(b, o.s);
+}
+function dropOther(id) {
+  const b = others.get(id); if (!b) return;
+  scene.remove(b.grp); b.lbl.remove(); if (b.edge) b.edge.remove();
+  if (st.auto === b) { st.auto = null; updateAutoUi(); }
+  others.delete(id);
+}
+function setState(b, s) {
+  b.from.copy(b.seen ? b.pos : V(s[0], s[1], s[2])); b.to.set(s[0], s[1], s[2]); b.qt.set(s[3], s[4], s[5], s[6]); b.thr = s[7]; b.t0 = performance.now();
+  if (!b.seen) { b.seen = true; b.pos.copy(b.to); b.q.copy(b.qt); b.grp.visible = true; }
+}
+function nearestOther() {
+  let best = null, d = Infinity;
+  for (const b of others.values()) if (b.seen) { const x = b.pos.distanceTo(st.pos); if (x < d) { d = x; best = b; } }
+  return best ? [best, d] : null;
+}
+function sendState(now) {
+  if (!me || ws.readyState !== 1 || now - lastSend < TICK) return; lastSend = now;
+  const q = st.quat; ws.send(JSON.stringify({ t: 'st', s: [st.pos.x, st.pos.y, st.pos.z, q.x, q.y, q.z, q.w, st.dead ? 0 : st.thr] }));
+}
+const qRoll = new THREE.Quaternion(), ZAX = V(0, 0, 1);
+// a sign's look on a ship: wings rock, lights blink, a firework bursts
+function signFx(fx, k) { fx[k] = performance.now(); if (k === 'fire') fireworks(fx); }
+function shipFx(fx, now, grp, dot) {
+  const w = (now - (fx.wave || -1e9)) / 1000, l = (now - (fx.lights || -1e9)) / 1000;
+  const roll = w < 1.8 ? Math.sin(w * 9) * .55 * (1 - w / 1.8) : 0;
+  if (dot) dot.scale.setScalar(l < 1.6 && Math.floor(l * 4) % 2 === 0 ? .05 : .016);
+  return roll;
+}
+const myFx = {};
+function othersStep(now) {
+  for (const b of others.values()) {
+    if (!b.seen) continue;
+    const k = clamp((now - b.t0) / (TICK * 1.1), 0, 1); b.pos.lerpVectors(b.from, b.to, k); b.q.slerp(b.qt, .25);
+    b.grp.position.subVectors(b.pos, st.pos);
+    const roll = shipFx(b.fx, now, b.grp, b.dot);
+    b.model.quaternion.copy(b.q).multiply(qRoll.setFromAxisAngle(ZAX, roll));
+    for (const f of b.flames) { f.scale.set(1, .15 + b.thr * (1 + Math.random() * .25), 1); f.material.opacity = .25 + b.thr * .7; }
+    b.dot.material.opacity = .35 + .65 * THREE.MathUtils.smoothstep(b.pos.distanceTo(st.pos), SHIP * 20, SHIP * 400);
+  }
+}
+function drawShipLabels() {
+  const ns = nearestOther();
+  for (const b of others.values()) {
+    if (!b.seen || st.dead) { b.lbl.style.opacity = 0; continue; }
+    proj.subVectors(b.pos, st.pos).project(camera);
+    const on = proj.z <= 1 && Math.abs(proj.x) < .97 && Math.abs(proj.y) < .97;
+    edgeMark(b, !on && (b === ns?.[0] || b === st.auto));
+    if (b.edge) b.edge.style.color = '#' + b.col.getHexString();
+    if (!on) { b.lbl.style.opacity = 0; b.lbl.style.pointerEvents = 'none'; continue; }
+    b.lbl.style.opacity = 1; b.lbl.style.pointerEvents = 'auto';
+    b.lbl.textContent = `${bodyName(b)} · ${distFmt(b.pos.distanceTo(st.pos))}`;
+    b.lbl.style.transform = `translate(${(proj.x * .5 + .5) * innerWidth + 10}px,${(-proj.y * .5 + .5) * innerHeight - 12}px)`;
+  }
+  // signs go to the nearest shuttle; the bar shows while anyone is in this place
+  $('signs').hidden = !ns || st.dead || !$('menu').hidden;
+  $('hNetS').hidden = !others.size; $('hNet').textContent = fmt(others.size + 1);
+  if (ns) $('signTo').textContent = t('signFor', { name: bodyName(ns[0]) });
+}
+let lastSign = 0;
+function sendSign(k) {
+  const ns = nearestOther(); if (!ns || !me || performance.now() - lastSign < 1500) return; lastSign = performance.now();
+  ws.send(JSON.stringify({ t: 'sign', k, to: ns[0].sid })); signFx(myFx, k);
+  if (actx) beep(k === 'fire' ? 520 : 660, .08, .05);
+}
+for (const [id, k] of [['sWave', 'wave'], ['sLights', 'lights'], ['sFire', 'fire'], ['sFollow', 'follow']]) $(id).onclick = () => sendSign(k);
+function gotSign(m) {
+  const b = others.get(m.id); if (!b) return;
+  signFx(b.fx, m.k);
+  const mine = me && m.to === me.id, name = bodyName(b);
+  if (m.k === 'follow') { if (mine) toast(t('gotFollow', { name }), t('followBtn'), () => startAuto(b)); return; }
+  const key = { wave: 'gotWave', lights: 'gotLights', fire: 'gotFire' }[m.k];
+  if (mine || m.k === 'fire') toast(t(mine && m.k !== 'fire' ? key : m.k === 'fire' ? key : key + 'All', { name }));
+  if (mine && actx) beep(880, .1, .05);
+}
+// fireworks: a burst of coloured sparks around a shuttle, drawn relative to the ship like everything else
+const FW = 260, fireList = [];
+function fireworks(fx) {
+  const pos = new Float32Array(FW * 3), vel = new Float32Array(FW * 3), col = new Float32Array(FW * 3);
+  const base = fx === myFx ? null : [...others.values()].find(b => b.fx === fx);
+  const at = base ? base.pos.clone() : st.pos.clone(), c0 = new THREE.Color().setHSL(Math.random(), .9, .65), c1 = new THREE.Color().setHSL(Math.random(), .9, .7);
+  for (let i = 0; i < FW; i++) {
+    const u = Math.random() * 2 - 1, a = Math.random() * 6.283, r = Math.sqrt(1 - u * u), sp = SHIP * (6 + Math.random() * 3);
+    vel.set([r * Math.cos(a) * sp, u * sp, r * Math.sin(a) * sp], i * 3); const c = i % 2 ? c0 : c1; col.set([c.r, c.g, c.b], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const p = new THREE.Points(g, new THREE.PointsMaterial({ size: 4, sizeAttenuation: false, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  p.frustumCulled = false; scene.add(p); fireList.push({ p, vel, at, t: 0 });
+}
+function fireStep(dt) {
+  for (let i = fireList.length - 1; i >= 0; i--) {
+    const f = fireList[i]; f.t += dt; const a = f.p.geometry.attributes.position.array, drag = Math.exp(-dt * 1.2);
+    for (let j = 0; j < a.length; j++) { a[j] += f.vel[j] * dt; f.vel[j] *= drag; }
+    f.p.geometry.attributes.position.needsUpdate = true; f.p.position.subVectors(f.at, st.pos);
+    f.p.material.opacity = Math.max(0, 1 - f.t / 2.6);
+    if (f.t > 2.7) { scene.remove(f.p); f.p.geometry.dispose(); f.p.material.dispose(); fireList.splice(i, 1); }
+  }
+}
+
+/* ================= your star (from the birth date, which stays on this device) ================= */
+let myStar = null;
+function pickStar() {
+  const q = QS.get('star'); if (starById(q)) { myStar = starById(q); return; }
+  const d = ls.get('trav-bdate'); if (!d) { myStar = null; return; }
+  const b = new Date(d + 'T12:00:00'); myStar = isNaN(b) ? null : starForAge((Date.now() - b) / (365.25 * DAY));
+}
+function starHint() { $('starHint').textContent = myStar ? t('starHint', { name: D.stars[myStar[0]][0] }) : t('solHint'); }
+$('bdate').value = ls.get('trav-bdate') || ''; $('bdate').max = new Date().toISOString().slice(0, 10);
+$('bdate').addEventListener('change', () => { ls.set('trav-bdate', $('bdate').value); pickStar(); starHint(); });
+pickStar(); if (starById(QS.get('star'))) $('bday').hidden = true;
 
 /* ================= controls ================= */
 // steering: press anywhere on the sky and drag — the offset from where you pressed is the stick
@@ -576,11 +774,14 @@ function applyLang(l) {
   $('introHow').textContent = t(touch ? 'introMob' : 'introDesk');
   [...$('langs').children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.l === l)));
   const c = cardFor; cardFor = undefined; showCard(c); updateAutoUi();
+  starHint();
   $('home').href = 'https://cosmos.tomerisr.org.il/' + (qLang === 'he' ? 'he/' : l === 'en' ? 'en/' : '');
 }
 LANGS.forEach(l => { const b = document.createElement('button'); b.type = 'button'; b.dataset.l = l; b.textContent = I18N[l]._name; b.onclick = () => applyLang(l); $('langs').appendChild(b); });
 applyLang(lang);
-$('bGo').onclick = () => { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi(); if (QS.get('go') === 'hole') warp('hole'); };
+$('bGo').onclick = () => { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi();
+  if (!netOn) connect();
+  if (QS.get('go') === 'hole') warp('hole'); else if (myStar) setSpace(myStar[0]); };
 
 /* ================= loop ================= */
 const uniformsOf = b => b.mesh.material.uniforms;
@@ -592,9 +793,10 @@ function frame(now) {
   const [nb, alt] = st.dead ? nearest() : flyStep(dt);
   const danger = $('hud').hidden || space === 'hole' ? 0 : heat(dt, now); boomStep(dt);
   if (space === 'hole' && !$('hud').hidden && !warping) { shipSec += dt; earthSec += dt * dil(); }
+  othersStep(now); fireStep(dt); if (!$('hud').hidden && !warping) sendState(now);
   // floating origin: everything relative to the ship
   sun.position.subVectors(sunBody.pos, st.pos); sunGlow.position.copy(sun.position); sunStar.position.copy(sun.position); sunLight.position.copy(sun.position);
-  sun.material.uniforms.uTime.value = now / 1000; sun.material.uniforms.uNear.value = 1 - THREE.MathUtils.smoothstep(sun.position.length() / sunR, 1.1, 2.5);
+  sun.material.uniforms.uTime.value = now / 1000; sun.material.uniforms.uNear.value = 1 - THREE.MathUtils.smoothstep(sun.position.length() / heatBody().R, 1.1, 2.5);
   for (const b of bodies) {
     b.grp.position.subVectors(b.pos, st.pos);
     const u = uniformsOf(b), d = b.grp.position.length();
@@ -607,10 +809,11 @@ function frame(now) {
   }
   clouds.material.uniforms.uSun.value.copy(sun.position);
   ringMat.uniforms.uSun.value.copy(sun.position); ringMat.uniforms.uC.value.copy(P.saturn.grp.position);
-  sunStar.material.opacity = THREE.MathUtils.smoothstep(sun.position.length() / sunR, 30, 200);
+  sunStar.material.opacity = THREE.MathUtils.smoothstep(sun.position.length() / heatBody().R, 30, 200);
   sky.position.set(0, 0, 0);
   for (const f of ship.userData.flames) { f.scale.set(1, .15 + st.thr * (1 + Math.random() * .25), 1); f.material.opacity = .25 + st.thr * .7; }
   placeCamera(dt, danger);
+  ship.userData.model.quaternion.setFromAxisAngle(ZAX, shipFx(myFx, now));
   if (space === 'hole') {
     // the hole is drawn by the ray tracer, the shuttle on top of it, lit from the disc
     sunLight.position.copy(st.pos).negate();
@@ -621,7 +824,7 @@ function frame(now) {
     renderer.setRenderTarget(bhRT); renderer.render(bhScene, qcam); renderer.setRenderTarget(null);
     renderer.render(outScene, qcam); renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, camera); renderer.autoClear = true;
   } else renderer.render(scene, camera);
-  if (!$('hud').hidden) { hud(nb, alt); drawLabels(nb); }
+  if (!$('hud').hidden) { hud(nb, alt); drawLabels(nb); drawShipLabels(); }
   requestAnimationFrame(frame);
 }
 addEventListener('resize', () => { mob = innerWidth < 760; renderer.setSize(innerWidth, innerHeight, false); sizeBH(); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
@@ -634,4 +837,4 @@ function look(id, k = 3, side = .6, up = .25) {
 }
 // at the hole: put the ship k horizon radii out, h radii above the disc, facing the hole (r = 1 + x)
 function holeAt(k = 20, h = 1.5) { st.pos.set(0, RS * h, RS * k); st.vel.set(0, 0, 0); st.thr = 0; st.auto = null; st.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(st.pos, V(), V(0, 1, 0))); camQ.copy(st.quat); }
-window.__trav = { st, P, get ALL() { return ALL; }, startAuto, look, warp, setSpace, holeAt, dil };
+window.__trav = { st, P, get ALL() { return ALL; }, startAuto, look, warp, setSpace, holeAt, dil, others, sendSign, get me() { return me; }, get space() { return space; } };
