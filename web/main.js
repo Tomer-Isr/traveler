@@ -3,6 +3,7 @@
 // world positions live in JS doubles and every object is drawn relative to the ship.
 import * as THREE from 'three';
 import { I18N } from './i18n.js';
+import { chart, wheelSVG, zonedToUtc, findCity, SIGNS, SIGN_GLYPH, GLYPH } from './birth.js';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -386,7 +387,7 @@ function placeCamera(dt, shake = 0) {
 const labelsEl = $('labels');
 for (const b of [...SOL, HOLE, STARB]) { const el = document.createElement('div'); el.className = 'lbl'; labelsEl.appendChild(el); el.onclick = () => startAuto(b); b.lbl = el; }
 const proj = V();
-const bodyName = b => b.id === 'star' ? D.stars[curStar[0]][0] : b.id === 'ship' ? t('shipN', { n: b.n }) : D.bodies[b.id];
+const bodyName = b => b.id === 'con' ? conName(natal?.sunCon) : b.id === 'star' ? D.stars[curStar[0]][0] : b.id === 'ship' ? t('shipN', { n: b.n }) : D.bodies[b.id];
 function distFmt(u) {
   const km = u * 1000;
   if (km < 1) return `${fmt(Math.max(0, km * 1000), km < .01 ? 1 : 0)} ${t('m')}`;
@@ -436,7 +437,11 @@ function showCard(b) {
     `${D.stars[s[0]][1][0].toUpperCase() + D.stars[s[0]][1].slice(1)}. ` + t('starLight', { n: `${fmt(s[1], 1)} ${plural(Math.round(s[1]), D.uYear)}` })]; }
   $('cName').textContent = bodyName(b);
   const keys = b.id === 'star' ? ['fType', 'fDist', 'fRad', 'fTemp'] : b.id === 'hole' ? ['fHorizon', 'fMass', 'fDist', 'fDisk'] : ['fDiam', 'fDay', 'fYear', 'fG', 'fTemp', 'fMoons'];
-  $('cFacts').innerHTML = keys.map((k, i) => f[i] && f[i] !== '—' ? `<dt>${t(k)}</dt><dd>${f[i]}</dd>` : '').join('');
+  let bd = '';
+  const pl = PLANETS.find(x => x[0] === b.id);
+  if (pl && birth.date) { const age = ageDays() / pl[3], next = (Math.floor(age) + 1 - age) * pl[3];
+    bd = `<dt class="bd">${t('bdHere')}</dt><dd class="bd">${fmt(age, age < 10 ? 1 : 0)} ${plural(age < 10 ? age : Math.round(age), D.uYear)}</dd><dt class="bd">${t('bdNextHere')}</dt><dd class="bd">${next < 1 ? t('todayBd') : t('inDays', { n: fmt(Math.ceil(next)), date: new Date(Date.now() + next * DAY).toLocaleDateString(D._locale, { day: 'numeric', month: 'long', year: 'numeric' }) })}</dd>`; }
+  $('cFacts').innerHTML = keys.map((k, i) => f[i] && f[i] !== '—' ? `<dt>${t(k)}</dt><dd>${f[i]}</dd>` : '').join('') + bd;
   $('cFact').textContent = f[keys.length]; $('card').hidden = false;
 }
 function hud(nb, alt) {
@@ -558,6 +563,8 @@ function setSpace(to) {
   } else if (star) startAtStar();
   else startNearEarth();
   if (from === 'hole' && to !== 'hole' && shipSec > 1) toast(t('backP', { ship: spanFmt(shipSec), earth: spanFmt(earthSec) }));
+  if (to !== 'sol' && simTime) { simTime = null; $('timeBar').hidden = true; }
+  skyGrp.visible = skyOn && to !== 'hole';
   netGo();
 }
 let warping = false;
@@ -662,7 +669,7 @@ function drawShipLabels() {
     if (b.edge) b.edge.style.color = '#' + b.col.getHexString();
     if (!on) { b.lbl.style.opacity = 0; b.lbl.style.pointerEvents = 'none'; continue; }
     b.lbl.style.opacity = 1; b.lbl.style.pointerEvents = 'auto';
-    b.lbl.textContent = `${bodyName(b)} · ${distFmt(b.pos.distanceTo(st.pos))}`;
+    b.lbl.textContent = `${bodyName(b)}${b.bday ? ' · ★' : ''} · ${distFmt(b.pos.distanceTo(st.pos))}`;
     b.lbl.style.transform = `translate(${(proj.x * .5 + .5) * innerWidth + 10}px,${(-proj.y * .5 + .5) * innerHeight - 12}px)`;
   }
   // signs go to the nearest shuttle; the bar shows while anyone is in this place
@@ -681,6 +688,7 @@ function gotSign(m) {
   const b = others.get(m.id); if (!b) return;
   signFx(b.fx, m.k);
   const mine = me && m.to === me.id, name = bodyName(b);
+  if (m.k === 'bday') { b.bday = true; toast(t('gotBday', { name }), t('sWave'), () => { const ns = b; if (me) { ws.send(JSON.stringify({ t: 'sign', k: 'wave', to: ns.sid })); signFx(myFx, 'wave'); } }); return; }
   if (m.k === 'follow') { if (mine) toast(t('gotFollow', { name }), t('followBtn'), () => startAuto(b)); return; }
   const key = { wave: 'gotWave', lights: 'gotLights', fire: 'gotFire' }[m.k];
   if (mine || m.k === 'fire') toast(t(mine && m.k !== 'fire' ? key : m.k === 'fire' ? key : key + 'All', { name }));
@@ -710,17 +718,166 @@ function fireStep(dt) {
   }
 }
 
-/* ================= your star (from the birth date, which stays on this device) ================= */
+/* ================= your birth (date, optional time and city — all stay on this device) ================= */
+// the main site may pass ?d=YYYY-MM-DD; it is saved here and removed from the address bar
+let birth = (() => { try { return JSON.parse(ls.get('trav-birth')) || {}; } catch (e) { return {}; } })();
+if (!birth.date && ls.get('trav-bdate')) birth.date = ls.get('trav-bdate');
+if (/^\d{4}-\d{2}-\d{2}$/.test(QS.get('d') || '')) { birth.date = QS.get('d'); QS.delete('d'); try { history.replaceState(null, '', location.pathname + (QS.toString() ? '?' + QS : '')); } catch (e) {} }
+const saveBirth = () => ls.set('trav-birth', JSON.stringify(birth));
+saveBirth();
+// the moment of birth in UTC: with a city — its local time (noon if no time), without — noon on this device's clock
+function birthUtc() {
+  if (!birth.date) return null; const [y, m, d] = birth.date.split('-').map(Number), [h, mi] = (birth.time || '12:00').split(':').map(Number);
+  return birth.city ? zonedToUtc(y, m, d, h, mi, birth.city.tz) : new Date(y, m - 1, d, h, mi).getTime();
+}
+const ageDays = () => birth.date ? (Date.now() - birthUtc()) / DAY : null;
 let myStar = null;
 function pickStar() {
   const q = QS.get('star'); if (starById(q)) { myStar = starById(q); return; }
-  const d = ls.get('trav-bdate'); if (!d) { myStar = null; return; }
-  const b = new Date(d + 'T12:00:00'); myStar = isNaN(b) ? null : starForAge((Date.now() - b) / (365.25 * DAY));
+  myStar = birth.date ? starForAge(ageDays() / 365.25) : null;
 }
 function starHint() { $('starHint').textContent = myStar ? t('starHint', { name: D.stars[myStar[0]][0] }) : t('solHint'); }
-$('bdate').value = ls.get('trav-bdate') || ''; $('bdate').max = new Date().toISOString().slice(0, 10);
-$('bdate').addEventListener('change', () => { ls.set('trav-bdate', $('bdate').value); pickStar(); starHint(); });
-pickStar(); if (starById(QS.get('star'))) $('bday').hidden = true;
+$('bdate').value = birth.date || ''; $('bdate').max = new Date().toISOString().slice(0, 10);
+$('bdate').addEventListener('change', () => { birth.date = $('bdate').value || undefined; saveBirth(); pickStar(); starHint(); });
+pickStar(); if (starById(QS.get('star')) && birth.date) $('bday').hidden = true;
+
+/* ================= my sky: real stars, constellations, the time machine, the honest sign, the chart ================= */
+let skyData = null, skyOn = false, simTime = null, natal = null, conLabels = [];
+const skyGrp = new THREE.Group(); skyGrp.visible = false; scene.add(skyGrp);
+const EPS = 23.4393 * Math.PI / 180;
+// J2000 equatorial (RA°, Dec°) -> direction in the game frame, where the ecliptic is the y = 0 plane
+function eqDir(ra, dec, out = V()) {
+  const a = ra * Math.PI / 180, d = dec * Math.PI / 180, x = Math.cos(d) * Math.cos(a), y = Math.cos(d) * Math.sin(a), z = Math.sin(d);
+  const ye = y * Math.cos(EPS) + z * Math.sin(EPS), ze = -y * Math.sin(EPS) + z * Math.cos(EPS);
+  return out.set(x, ze, -ye);
+}
+const SKY_R = 9e7, ZODIAC = ['Ari', 'Tau', 'Gem', 'Cnc', 'Leo', 'Vir', 'Lib', 'Sco', 'Oph', 'Sgr', 'Cap', 'Aqr', 'Psc'];
+let mineLines = null;
+let skyP = null;
+const loadSky = () => skyP ||= buildSky();
+async function buildSky() {
+  const data = await (await fetch('/data/sky.json')).json(); skyData = data;
+  const s = skyData.stars, n = s.length / 4, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), size = new Float32Array(n), c = new THREE.Color(), v = V();
+  for (let i = 0; i < n; i++) {
+    eqDir(s[i * 4], s[i * 4 + 1], v).multiplyScalar(SKY_R); pos.set([v.x, v.y, v.z], i * 3);
+    const bv = s[i * 4 + 3]; c.setRGB(bv < .3 ? .72 : 1, bv < .3 ? .82 : bv < .9 ? .92 : .74, bv < .3 ? 1 : bv < .9 ? .82 : .52); col.set([c.r, c.g, c.b], i * 3);
+    size[i] = Math.max(1.2, 6.2 - s[i * 4 + 2] * .85);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('size', new THREE.BufferAttribute(size, 1));
+  const pts = new THREE.Points(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: LDV[0] + `attribute float size;attribute vec3 color;varying vec3 vC;void main(){vC=color;vec4 mv=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mv;gl_PointSize=size*${PR.toFixed(2)};` + LDV[1] + `}`,
+    fragmentShader: LDF[0] + `varying vec3 vC;void main(){` + LDF[1] + `float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vC,smoothstep(.5,.1,d));}` }));
+  pts.frustumCulled = false; skyGrp.add(pts);
+  const seg = id => { const out = []; for (const l of skyData.lines[id]) for (let i = 0; i + 3 < l.length; i += 2) { out.push(...eqDir(l[i], l[i + 1]).multiplyScalar(SKY_R * .99).toArray(), ...eqDir(l[i + 2], l[i + 3]).multiplyScalar(SKY_R * .99).toArray()); } return out; };
+  const lineGeo = ids => { const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.Float32BufferAttribute(ids.flatMap(seg), 3)); return g2; };
+  const all = new THREE.LineSegments(lineGeo(Object.keys(skyData.lines).filter(k => !ZODIAC.includes(k))), new THREE.LineBasicMaterial({ color: 0x4a5a9a, transparent: true, opacity: .35, depthWrite: false }));
+  const zod = new THREE.LineSegments(lineGeo(ZODIAC), new THREE.LineBasicMaterial({ color: 0x8fb4ff, transparent: true, opacity: .6, depthWrite: false }));
+  for (const l of [all, zod]) { l.frustumCulled = false; skyGrp.add(l); }
+  mineLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .95, depthWrite: false })); mineLines.frustumCulled = false; skyGrp.add(mineLines);
+  skyGrp.userData.seg = seg;
+  for (const id of ZODIAC) { const el = document.createElement('div'); el.className = 'con'; labelsEl.appendChild(el); conLabels.push({ id, el, dir: eqDir(skyData.names[id][3], skyData.names[id][4]) }); }
+  markMine(); return skyData;
+}
+function markMine() {
+  if (!mineLines || !natal) return;
+  mineLines.geometry.dispose(); mineLines.geometry = new THREE.BufferGeometry();
+  mineLines.geometry.setAttribute('position', new THREE.Float32BufferAttribute(skyGrp.userData.seg(natal.sunCon), 3));
+}
+async function setSky(on) { skyOn = on; if (on) await loadSky(); skyGrp.visible = skyOn && space !== 'hole'; sky.material.color.set(skyOn ? 0x2a2a38 : 0x8a8aa0); }
+const conName = id => skyData?.names[id] ? skyData.names[id][lang === 'ru' ? 0 : 1] : id;
+const signName = i => D.signs[i];
+function drawConLabels() {
+  const [nb, alt] = nearest(), close = alt < nb.R * 2.5; // a planet filling the view hides the sky labels behind it
+  for (const c of conLabels) {
+    const show = skyGrp.visible && !close; proj.copy(c.dir).multiplyScalar(SKY_R).project(camera);
+    if (!show || proj.z > 1 || Math.abs(proj.x) > .98 || Math.abs(proj.y) > .98) { c.el.style.opacity = 0; continue; }
+    c.el.style.opacity = 1; c.el.textContent = conName(c.id); c.el.classList.toggle('mine', natal?.sunCon === c.id);
+    c.el.style.transform = `translate(${(proj.x * .5 + .5) * innerWidth}px,${(-proj.y * .5 + .5) * innerHeight}px) translate(-50%,-50%)`;
+  }
+}
+// turn the ship toward the constellation the Sun stood in when you were born
+const CONB = { id: 'con', R: 0, pos: V(), dir: V() };
+async function aimSunCon() {
+  await setSky(true); const n = skyData.names[natal.sunCon]; eqDir(n[3], n[4], CONB.dir); CONB.pos.copy(st.pos).addScaledVector(CONB.dir, 1e9);
+  st.auto = null; st.aim = CONB; updateAutoUi(); $('me').hidden = true;
+}
+// the time machine: the planets go back to where they were the day you were born
+function timeMachine(on) {
+  simTime = on ? birthUtc() : null; $('timeBar').hidden = !on;
+  if (on) { $('timeT').textContent = t('timeOn', { date: new Date(simTime).toLocaleDateString(D._locale, { day: 'numeric', month: 'long', year: 'numeric' }) }); if (space !== 'sol') setSpace('sol'); setSky(true); }
+  $('me').hidden = true;
+}
+$('timeBack').onclick = () => timeMachine(false);
+const moonPhaseName = p => D.phases[Math.round(p / 45) % 8];
+function renderMe() {
+  if (!skyData) { loadSky().then(renderMe); }
+  const box = $('meBody'); natal = birth.date ? chart(birthUtc(), birth.city?.lat, birth.city?.lon) : null; markMine();
+  $('meDate').value = birth.date || ''; $('meTime').value = birth.time || ''; $('meCity').value = birth.city?.name || '';
+  $('meNote').textContent = birth.city ? t('meCityOk', { city: birth.city.name }) : t('meCityHint');
+  if (!natal) { box.innerHTML = `<p class="me-empty">${t('meEmpty')}</p>`; return; }
+  const c = natal, sign = c.sun.sign, conId = c.sunCon, same = SIGNS[sign] === conId;
+  const honest = t('signIs', { sign: signName(sign) }) + ' ' + (conId === 'Oph' ? t('conOph') : same ? t('conSame', { con: conName(conId) }) : t('conDiff', { con: conName(conId) }));
+  const ord = n => lang === 'ru' ? `${Math.floor(n)}°` : `${Math.floor(n)}°`;
+  const rows = c.planets.map(p => `<li><b>${GLYPH[p.id]}︎ ${D.pl[p.id]}</b> ${t('inSign', { sign: signName(p.sign) })} ${ord(p.deg)}${p.retro ? ' ℞' : ''}<span>${D.roles[p.id]}: ${D.traits[p.sign]}</span></li>`).join('')
+    + (c.asc != null ? `<li><b>ASC ${t('asc')}</b> ${t('inSign', { sign: signName(Math.floor(c.asc / 30)) })} ${ord(c.asc % 30)}<span>${D.roles.asc}: ${D.traits[Math.floor(c.asc / 30)]}</span></li>` : '');
+  const days = ageDays(), pb = PLANETS.map(p => {
+    const per = p[3], age = days / per, next = (Math.floor(age) + 1 - age) * per, dt = new Date(Date.now() + next * DAY);
+    return `<tr><td>${D.bodies[p[0]]}</td><td>${fmt(age, age < 10 ? 1 : 0)}</td><td>${next < 1 ? t('todayBd') : dt.toLocaleDateString(D._locale, { day: 'numeric', month: 'short', year: 'numeric' })}</td></tr>`;
+  }).join('');
+  box.innerHTML = `
+    <section><h3>${t('meSign')}</h3><p class="big">${SIGN_GLYPH[sign]} ${signName(sign)}</p><p>${honest}</p><p class="dim">${t('signTrait', { trait: D.traits[sign] })}</p>
+      <button type="button" class="btn ghost" id="meAim">${t('meAim', { con: conName(conId) })}</button></section>
+    <section><h3>${t('meSky')}</h3>
+      <p>${t('moonWas', { phase: moonPhaseName(c.phase), lit: Math.round(c.lit * 100) })}</p>
+      ${c.bright ? `<p>${t(c.bright.morning ? 'brightMorning' : 'brightEvening', { name: D.bodies[c.bright.id] })}</p>` : ''}
+      <button type="button" class="btn" id="meTime2">${t('timeBtn')}</button></section>
+    <section><h3>${t('meChart')}</h3><div class="wheel">${wheelSVG(c, 320)}</div><ul class="pl">${rows}</ul>
+      <button type="button" class="btn ghost" id="meSave">${t('saveChart')}</button><p class="dim">${t('astroNote')}</p></section>
+    <section><h3>${t('meBd')}</h3><table class="bd"><tr><th></th><th>${t('bdAge')}</th><th>${t('bdNext')}</th></tr>${pb}</table></section>`;
+  $('meAim').onclick = aimSunCon; $('meTime2').onclick = () => timeMachine(true); $('meSave').onclick = () => saveChart(c);
+}
+// the chart as a picture to keep or send: the wheel on a dark card with the date and the honest sign
+async function saveChart(c) {
+  const W = 1080, H = 1350, cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
+  x.fillStyle = '#04050c'; x.fillRect(0, 0, W, H);
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(wheelSVG(c, 900)); await img.decode();
+  x.drawImage(img, 90, 250, 900, 900);
+  x.fillStyle = '#e2dff7'; x.font = '700 64px Unbounded, sans-serif'; x.fillText(t('chartTitle'), 90, 130);
+  x.fillStyle = '#9a97c2'; x.font = '500 34px "Golos Text", sans-serif';
+  x.fillText(new Date(birthUtc()).toLocaleDateString(D._locale, { day: 'numeric', month: 'long', year: 'numeric' }) + (birth.city ? ' · ' + birth.city.name.split(',')[0] : ''), 90, 195);
+  x.fillStyle = '#ffb454'; x.font = '600 36px "Golos Text", sans-serif';
+  x.fillText(`☉ ${signName(c.sun.sign)}  ☽ ${signName(c.planets[1].sign)}` + (c.asc != null ? `  ASC ${signName(Math.floor(c.asc / 30))}` : ''), 90, 1230);
+  x.fillStyle = '#9a97c2'; x.font = '500 28px "Golos Text", sans-serif'; x.fillText('traveler.tomerisr.org.il', 90, 1290);
+  cv.toBlob(async b => {
+    const f = new File([b], 'chart.png', { type: 'image/png' });
+    if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f] }); return; } catch (e) {} }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'chart.png'; a.click();
+  });
+}
+$('bMe').onclick = () => { renderMe(); $('me').hidden = false; };
+$('meX').onclick = () => $('me').hidden = true;
+$('me').addEventListener('click', e => { if (e.target.id === 'me') $('me').hidden = true; });
+$('meDate').max = new Date().toISOString().slice(0, 10);
+$('meDate').addEventListener('change', () => { birth.date = $('meDate').value || undefined; saveBirth(); pickStar(); renderMe(); });
+$('meTime').addEventListener('change', () => { birth.time = $('meTime').value || undefined; saveBirth(); renderMe(); });
+let cityT = 0;
+$('meCity').addEventListener('input', () => {
+  clearTimeout(cityT); const q = $('meCity').value.trim(); $('meCities').innerHTML = '';
+  if (q.length < 2) { if (!q && birth.city) { birth.city = undefined; saveBirth(); renderMe(); } return; }
+  cityT = setTimeout(async () => {
+    let list = []; try { list = await findCity(q, lang); } catch (e) {}
+    $('meCities').innerHTML = ''; for (const c of list) { const b = document.createElement('button'); b.type = 'button'; b.textContent = c.name; b.onclick = () => { birth.city = c; saveBirth(); $('meCities').innerHTML = ''; renderMe(); }; $('meCities').appendChild(b); }
+  }, 400);
+});
+// on your birthday: fireworks, and everyone on air hears about it
+const isBirthday = () => { if (!birth.date) return false; const n = new Date(); return birth.date.slice(5) === `${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
+let bdDone = false;
+function celebrate() {
+  if (bdDone || !isBirthday()) return; bdDone = true;
+  const years = Math.floor(ageDays() / 365.25);
+  toast(t('hbd', { n: years })); [0, 700, 1500, 2400].forEach(ms => setTimeout(() => signFx(myFx, 'fire'), ms));
+  setTimeout(() => { if (me && ws.readyState === 1) ws.send(JSON.stringify({ t: 'sign', k: 'bday', to: 0 })); }, 3000);
+}
 
 /* ================= controls ================= */
 // steering: press anywhere on the sky and drag — the offset from where you pressed is the stick
@@ -774,21 +931,22 @@ function applyLang(l) {
   $('introHow').textContent = t(touch ? 'introMob' : 'introDesk');
   [...$('langs').children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.l === l)));
   const c = cardFor; cardFor = undefined; showCard(c); updateAutoUi();
-  starHint();
+  starHint(); if (!$('me').hidden) renderMe();
   $('home').href = 'https://cosmos.tomerisr.org.il/' + (qLang === 'he' ? 'he/' : l === 'en' ? 'en/' : '');
 }
 LANGS.forEach(l => { const b = document.createElement('button'); b.type = 'button'; b.dataset.l = l; b.textContent = I18N[l]._name; b.onclick = () => applyLang(l); $('langs').appendChild(b); });
 applyLang(lang);
 $('bGo').onclick = () => { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} $('intro').hidden = true; ['hud', 'ctl', 'throttle'].forEach(id => $(id).hidden = false); setThrUi();
   if (!netOn) connect();
-  if (QS.get('go') === 'hole') warp('hole'); else if (myStar) setSpace(myStar[0]); };
+  if (QS.get('go') === 'hole') warp('hole'); else if (myStar) setSpace(myStar[0]);
+  setTimeout(celebrate, 1500); };
 
 /* ================= loop ================= */
 const uniformsOf = b => b.mesh.material.uniforms;
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now;
-  placeBodies(Date.now());
+  placeBodies(simTime ?? Date.now());
   if (!st.dead) keyInput(dt); else { st.yaw = st.pitch = st.roll = 0; st.thr = 0; }
   const [nb, alt] = st.dead ? nearest() : flyStep(dt);
   const danger = $('hud').hidden || space === 'hole' ? 0 : heat(dt, now); boomStep(dt);
@@ -824,7 +982,9 @@ function frame(now) {
     renderer.setRenderTarget(bhRT); renderer.render(bhScene, qcam); renderer.setRenderTarget(null);
     renderer.render(outScene, qcam); renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, camera); renderer.autoClear = true;
   } else renderer.render(scene, camera);
-  if (!$('hud').hidden) { hud(nb, alt); drawLabels(nb); drawShipLabels(); }
+  CONB.pos.copy(st.pos).addScaledVector(CONB.dir, 1e9);
+  if (!$('hud').hidden) { hud(nb, alt); drawLabels(nb); drawShipLabels(); drawConLabels();
+    proj.copy(CONB.dir).project(camera); edgeMark(CONB, st.aim === CONB && !(proj.z <= 1 && Math.abs(proj.x) < .97 && Math.abs(proj.y) < .97)); }
   requestAnimationFrame(frame);
 }
 addEventListener('resize', () => { mob = innerWidth < 760; renderer.setSize(innerWidth, innerHeight, false); sizeBH(); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });

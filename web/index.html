@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
-<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }</script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js", "astronomy-engine": "https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/esm/astronomy.js" } }</script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -39,6 +39,7 @@
   <button type="button" class="btn" id="bWhere" data-i18n="where"></button>
   <button type="button" class="btn ghost" id="bAim"></button>
   <button type="button" class="btn ghost" id="bStop" data-i18n="stop"></button>
+  <button type="button" class="btn ghost me-btn" id="bMe"><i>✦</i><span data-i18n="meBtn"></span></button>
 </div>
 <div class="throttle" id="throttle" hidden>
   <button type="button" class="tbtn" id="bGas"><i>▲</i><span data-i18n="gas"></span></button>
@@ -66,6 +67,21 @@
   <div class="menu-in">
     <h2 data-i18n="where"></h2>
     <div class="menu-list" id="menuList"></div>
+  </div>
+</div>
+
+<div class="time-bar" id="timeBar" hidden><span id="timeT"></span><button type="button" id="timeBack" data-i18n="timeBack"></button></div>
+
+<div class="menu me" id="me" hidden>
+  <div class="menu-in me-in">
+    <div class="me-head"><h2 data-i18n="meTitle"></h2><button type="button" class="me-x" id="meX" aria-label="close">✕</button></div>
+    <div class="me-form">
+      <label><span data-i18n="meDateL"></span><input type="date" id="meDate" min="1900-01-01"></label>
+      <label><span data-i18n="meTimeL"></span><input type="time" id="meTime"></label>
+      <label class="wide"><span data-i18n="meCityL"></span><input type="text" id="meCity" autocomplete="off"><div class="cities" id="meCities"></div></label>
+      <p class="dim wide" id="meNote"></p>
+    </div>
+    <div id="meBody"></div>
   </div>
 </div>
 

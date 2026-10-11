@@ -1,7 +1,7 @@
 // Traveler online: who else is flying near the same star.
 // Rooms are places (the Solar System, the black hole, a star of someone's birth year), up to CAP ships per room —
 // a crowded place splits into copies. The server knows only a number-callsign, a colour, the space and where the
-// ship is; no names, no dates, no text. Signs are a fixed set of four.
+// ship is; no names, no dates, no text. Signs are a fixed set (four, plus a birthday notice).
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
@@ -10,7 +10,7 @@ const CAP = 24, TICK = 200, SIGN_GAP = 1500, PER_IP = 6;
 const STARS = ['alphaCen', 'barnard', 'sirius', 'epsEri', 'procyon', 'tauCet', 'altair', 'etaCas', 'vega', 'fomalhaut', 'pollux', 'arcturus',
   'capella', 'alderamin', 'castor', 'menkent', 'aldebaran', 'hamal', 'alphecca', 'regulus', 'merak', 'alcor', 'denebKaitos'];
 const SPACES = new Set(['sol', 'hole', ...STARS]);
-const SIGNS = new Set(['wave', 'lights', 'fire', 'follow']);
+const SIGNS = new Set(['wave', 'lights', 'fire', 'follow', 'bday']);
 const ORIGIN = /^(https:\/\/traveler\.tomerisr\.org\.il|https:\/\/cosmos\.tomerisr\.org\.il|http:\/\/localhost(:\d+)?|http:\/\/127\.0\.0\.1(:\d+)?)$/;
 
 const rooms = new Map(); // key -> Set(client)
@@ -32,7 +32,7 @@ function leave(c) {
   toRoom(c.room, { t: 'leave', id: c.id }); c.room = null;
 }
 function enter(c, space) {
-  leave(c); c.space = space; c.s = null; c.room = roomFor(space); const r = rooms.get(c.room);
+  leave(c); c.space = space; c.s = null; c.dirty = false; c.room = roomFor(space); const r = rooms.get(c.room);
   send(c, { t: 'room', space, others: [...r].map(o => ({ id: o.id, n: o.n, hue: o.hue, s: o.s })) });
   r.add(c); toRoom(c.room, { t: 'join', id: c.id, n: c.n, hue: c.hue }, c);
 }
@@ -74,10 +74,13 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => { leave(c); const n = (ipCount.get(ip) || 1) - 1; if (n > 0) ipCount.set(ip, n); else ipCount.delete(ip); });
 });
 // positions go out in batches, five times a second
+// (a ship that just changed place has no position yet: it is never sent until it reports one)
 setInterval(() => {
   for (const [key, r] of rooms) {
-    const moved = []; for (const c of r) if (c.dirty) { moved.push([c.id, ...c.s]); c.dirty = false; }
-    if (moved.length && r.size > 1) toRoom(key, { t: 'sts', a: moved });
+    try {
+      const moved = []; for (const c of r) if (c.dirty && c.s) { moved.push([c.id, ...c.s]); c.dirty = false; }
+      if (moved.length && r.size > 1) toRoom(key, { t: 'sts', a: moved });
+    } catch (e) { console.error('tick', key, e.message); }
   }
 }, TICK);
 setInterval(() => { for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); } }, 30000);
