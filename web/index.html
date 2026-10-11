@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
-<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js", "astronomy-engine": "https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/esm/astronomy.js" } }</script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js", "astronomy-engine": "https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/esm/astronomy.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/" } }</script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -70,11 +70,29 @@
   </div>
 </div>
 
+<div class="con-card" id="conCard" hidden></div>
+
+<div class="ov" id="ov" hidden>
+  <div class="ov-top">
+    <div class="ov-date"><span data-i18n="ovTitle"></span><b id="ovDate"></b><em id="ovSun"></em></div>
+    <button type="button" class="btn ghost" id="ovClose" data-i18n="ovClose"></button>
+  </div>
+  <div class="ov-card" id="ovCard" hidden></div>
+  <div class="ov-bar">
+    <div class="ov-play"><button type="button" id="ovBack" aria-label="back">◀◀</button><button type="button" id="ovPlay">▶</button><button type="button" id="ovFwd" aria-label="forward">▶▶</button><span id="ovSpeed"></span></div>
+    <div class="ov-jump"><button type="button" id="ovToday" data-i18n="ovToday"></button><button type="button" id="ovBd" data-i18n="ovBdBtn"></button><input type="date" id="ovPick" min="1800-01-01" max="2200-12-31"></div>
+    <p class="ov-hint" data-i18n="ovHint"></p>
+  </div>
+</div>
+<div id="ovLabels" hidden></div>
+
 <div class="time-bar" id="timeBar" hidden><span id="timeT"></span><button type="button" id="timeBack" data-i18n="timeBack"></button></div>
 
 <div class="menu me" id="me" hidden>
   <div class="menu-in me-in">
     <div class="me-head"><h2 data-i18n="meTitle"></h2><button type="button" class="me-x" id="meX" aria-label="close">✕</button></div>
+    <div id="meNow"></div>
+    <h3 class="me-h" data-i18n="meBirthH"></h3>
     <div class="me-form">
       <label><span data-i18n="meDateL"></span><input type="date" id="meDate" min="1900-01-01"></label>
       <label><span data-i18n="meTimeL"></span><input type="time" id="meTime"></label>

@@ -3,7 +3,7 @@
 // world positions live in JS doubles and every object is drawn relative to the ship.
 import * as THREE from 'three';
 import { I18N } from './i18n.js';
-import { chart, wheelSVG, zonedToUtc, findCity, SIGNS, SIGN_GLYPH, GLYPH } from './birth.js';
+import { chart, wheelSVG, zonedToUtc, findCity, skyAt, sunSpan, moonLit, SIGNS, SIGN_GLYPH, GLYPH } from './birth.js';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -740,6 +740,7 @@ function starHint() { $('starHint').textContent = myStar ? t('starHint', { name:
 $('bdate').value = birth.date || ''; $('bdate').max = new Date().toISOString().slice(0, 10);
 $('bdate').addEventListener('change', () => { birth.date = $('bdate').value || undefined; saveBirth(); pickStar(); starHint(); });
 pickStar(); if (starById(QS.get('star')) && birth.date) $('bday').hidden = true;
+if (ls.get('trav-sky')) setTimeout(() => setSky(true), 0);
 
 /* ================= my sky: real stars, constellations, the time machine, the honest sign, the chart ================= */
 let skyData = null, skyOn = false, simTime = null, natal = null, conLabels = [];
@@ -752,7 +753,7 @@ function eqDir(ra, dec, out = V()) {
   return out.set(x, ze, -ye);
 }
 const SKY_R = 9e7, ZODIAC = ['Ari', 'Tau', 'Gem', 'Cnc', 'Leo', 'Vir', 'Lib', 'Sco', 'Oph', 'Sgr', 'Cap', 'Aqr', 'Psc'];
-let mineLines = null;
+let mineLines = null, selLines = null, selCon = null;
 let skyP = null;
 const loadSky = () => skyP ||= buildSky();
 async function buildSky() {
@@ -775,7 +776,11 @@ async function buildSky() {
   for (const l of [all, zod]) { l.frustumCulled = false; skyGrp.add(l); }
   mineLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffb454, transparent: true, opacity: .95, depthWrite: false })); mineLines.frustumCulled = false; skyGrp.add(mineLines);
   skyGrp.userData.seg = seg;
-  for (const id of ZODIAC) { const el = document.createElement('div'); el.className = 'con'; labelsEl.appendChild(el); conLabels.push({ id, el, dir: eqDir(skyData.names[id][3], skyData.names[id][4]) }); }
+  selLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: .95, depthWrite: false })); selLines.frustumCulled = false; skyGrp.add(selLines);
+  for (const id of Object.keys(skyData.names).filter(k => ZODIAC.includes(k) || skyData.names[k][5] <= 2)) {
+    const el = document.createElement('div'); el.className = 'con' + (ZODIAC.includes(id) ? ' zod' : ''); el.onclick = () => showCon(id); labelsEl.appendChild(el);
+    conLabels.push({ id, el, dir: eqDir(skyData.names[id][3], skyData.names[id][4]) });
+  }
   markMine(); return skyData;
 }
 function markMine() {
@@ -783,23 +788,48 @@ function markMine() {
   mineLines.geometry.dispose(); mineLines.geometry = new THREE.BufferGeometry();
   mineLines.geometry.setAttribute('position', new THREE.Float32BufferAttribute(skyGrp.userData.seg(natal.sunCon), 3));
 }
-async function setSky(on) { skyOn = on; if (on) await loadSky(); skyGrp.visible = skyOn && space !== 'hole'; sky.material.color.set(skyOn ? 0x2a2a38 : 0x8a8aa0); }
+async function setSky(on) {
+  skyOn = on; ls.set('trav-sky', on ? '1' : ''); if (on) await loadSky(); skyGrp.visible = skyOn && space !== 'hole'; sky.material.color.set(skyOn ? 0x2a2a38 : 0x8a8aa0);
+  if (!on) $('conCard').hidden = true;
+}
 const conName = id => skyData?.names[id] ? skyData.names[id][lang === 'ru' ? 0 : 1] : id;
 const signName = i => D.signs[i];
 function drawConLabels() {
   const [nb, alt] = nearest(), close = alt < nb.R * 2.5; // a planet filling the view hides the sky labels behind it
   for (const c of conLabels) {
     const show = skyGrp.visible && !close; proj.copy(c.dir).multiplyScalar(SKY_R).project(camera);
-    if (!show || proj.z > 1 || Math.abs(proj.x) > .98 || Math.abs(proj.y) > .98) { c.el.style.opacity = 0; continue; }
-    c.el.style.opacity = 1; c.el.textContent = conName(c.id); c.el.classList.toggle('mine', natal?.sunCon === c.id);
+    if (!show || proj.z > 1 || Math.abs(proj.x) > .98 || Math.abs(proj.y) > .98) { c.el.style.opacity = 0; c.el.style.pointerEvents = 'none'; continue; }
+    c.el.style.opacity = 1; c.el.style.pointerEvents = 'auto'; c.el.classList.toggle('sel', selCon === c.id); c.el.textContent = conName(c.id); c.el.classList.toggle('mine', natal?.sunCon === c.id);
     c.el.style.transform = `translate(${(proj.x * .5 + .5) * innerWidth}px,${(-proj.y * .5 + .5) * innerHeight}px) translate(-50%,-50%)`;
   }
 }
-// turn the ship toward the constellation the Sun stood in when you were born
-const CONB = { id: 'con', R: 0, pos: V(), dir: V() };
-async function aimSunCon() {
-  await setSky(true); const n = skyData.names[natal.sunCon]; eqDir(n[3], n[4], CONB.dir); CONB.pos.copy(st.pos).addScaledVector(CONB.dir, 1e9);
-  st.auto = null; st.aim = CONB; updateAutoUi(); $('me').hidden = true;
+// turn the ship toward a constellation (the one the Sun stood in when you were born, or any you tapped)
+const CONB = { id: 'con', R: 0, pos: V(), dir: V(), con: null };
+async function aimCon(id) {
+  await setSky(true); const n = skyData.names[id]; eqDir(n[3], n[4], CONB.dir); CONB.pos.copy(st.pos).addScaledVector(CONB.dir, 1e9); CONB.con = id;
+  st.auto = null; st.aim = CONB; updateAutoUi(); $('me').hidden = true; selectCon(id);
+}
+const aimSunCon = () => aimCon(natal.sunCon);
+function selectCon(id) {
+  selCon = id; if (!selLines) return; selLines.geometry.dispose(); selLines.geometry = new THREE.BufferGeometry();
+  if (id) selLines.geometry.setAttribute('position', new THREE.Float32BufferAttribute(skyGrp.userData.seg(id), 3));
+}
+const MONTHS = () => Array.from({ length: 12 }, (_, i) => new Date(2026, i, 15).toLocaleDateString(D._locale, { month: 'long' }));
+function showCon(id) {
+  const n = skyData.names[id], now = simTime ?? Date.now(), here = skyAt(now).filter(x => x.con === id);
+  selectCon(id);
+  // best seen at midnight when the Sun is on the opposite side of the sky: Sun's RA = RA + 180°
+  const day = (((n[3] + 180) % 360) / 360) * 365.25, best = MONTHS()[new Date(Date.UTC(2026, 2, 20) + day * DAY).getMonth()];
+  const span = ZODIAC.includes(id) ? sunSpan(id, new Date(now).getFullYear()) : null, dfmt = d => d.toLocaleDateString(D._locale, { day: 'numeric', month: 'long' });
+  let h = `<h2>${conName(id)}</h2><p class="lat">${n[1]}</p>`;
+  if (span) h += `<p>${t('conSun', { from: dfmt(span[0]), to: dfmt(span[1]) })}</p>`;
+  if (here.length) h += `<p class="now">${t(simTime ? 'conThen' : 'conNow', { list: here.map(x => D.pl[x.id]).join(', ') })}</p>`;
+  h += `<p class="dim">${t('conBest', { month: best })} ${n[4] > -50 ? t('conNorth') : t('conSouth')}</p>`;
+  if (natal?.sunCon === id) h += `<p class="now">${t('conMine')}</p>`;
+  h += `<div class="row"><button type="button" class="btn" id="conAim">${t('conAim')}</button><button type="button" class="btn ghost" id="conX">${t('close')}</button></div>`;
+  $('conCard').innerHTML = h; $('conCard').hidden = false;
+  $('conAim').onclick = () => { aimCon(id); $('conCard').hidden = true; };
+  $('conX').onclick = () => { $('conCard').hidden = true; selectCon(null); };
 }
 // the time machine: the planets go back to where they were the day you were born
 function timeMachine(on) {
@@ -814,7 +844,17 @@ function renderMe() {
   const box = $('meBody'); natal = birth.date ? chart(birthUtc(), birth.city?.lat, birth.city?.lon) : null; markMine();
   $('meDate').value = birth.date || ''; $('meTime').value = birth.time || ''; $('meCity').value = birth.city?.name || '';
   $('meNote').textContent = birth.city ? t('meCityOk', { city: birth.city.name }) : t('meCityHint');
-  if (!natal) { box.innerHTML = `<p class="me-empty">${t('meEmpty')}</p>`; return; }
+  const nowSky = skyAt(simTime ?? Date.now()), ml = moonLit(simTime ?? Date.now());
+  const nowHtml = `<section class="now-sec"><h3>${t(simTime ? 'thenSky' : 'nowSky')}</h3>
+    <div class="row"><button type="button" class="btn${skyOn ? '' : ' ghost'}" id="meSkyT">${t(skyOn ? 'skyOff' : 'skyOn')}</button><button type="button" class="btn ghost" id="meOv">${t('ovBtn')}</button></div>
+    <ul class="pl now-list">${nowSky.map(x => `<li><b>${GLYPH[x.id]}︎ ${D.pl[x.id]}</b> — <a href="#" data-con="${x.id === 'pluto' ? '' : x.con}">${conName(x.con)}</a><span>${t('signWord')}: ${signName(x.sign)}${x.id === 'moon' ? ' · ' + moonPhaseName(ml.phase) + ', ' + Math.round(ml.lit * 100) + '%' : ''}</span></li>`).join('')}</ul></section>`;
+  const wire = () => {
+    $('meSkyT').onclick = async () => { await setSky(!skyOn); renderMe(); };
+    $('meOv').onclick = () => openOverview(simTime ?? Date.now());
+    $('meNow').querySelectorAll('[data-con]').forEach(a => a.onclick = e => { e.preventDefault(); if (!a.dataset.con || !skyData) return; $('me').hidden = true; setSky(true).then(() => showCon(a.dataset.con)); });
+  };
+  $('meNow').innerHTML = nowHtml;
+  if (!natal) { box.innerHTML = `<p class="me-empty">${t('meEmpty')}</p>`; wire(); return; }
   const c = natal, sign = c.sun.sign, conId = c.sunCon, same = SIGNS[sign] === conId;
   const honest = t('signIs', { sign: signName(sign) }) + ' ' + (conId === 'Oph' ? t('conOph') : same ? t('conSame', { con: conName(conId) }) : t('conDiff', { con: conName(conId) }));
   const ord = n => lang === 'ru' ? `${Math.floor(n)}°` : `${Math.floor(n)}°`;
@@ -830,11 +870,11 @@ function renderMe() {
     <section><h3>${t('meSky')}</h3>
       <p>${t('moonWas', { phase: moonPhaseName(c.phase), lit: Math.round(c.lit * 100) })}</p>
       ${c.bright ? `<p>${t(c.bright.morning ? 'brightMorning' : 'brightEvening', { name: D.bodies[c.bright.id] })}</p>` : ''}
-      <button type="button" class="btn" id="meTime2">${t('timeBtn')}</button></section>
+      <div class="row"><button type="button" class="btn" id="meTime2">${t('timeBtn')}</button><button type="button" class="btn ghost" id="meOvBd">${t('ovBd')}</button></div></section>
     <section><h3>${t('meChart')}</h3><div class="wheel">${wheelSVG(c, 320)}</div><ul class="pl">${rows}</ul>
       <button type="button" class="btn ghost" id="meSave">${t('saveChart')}</button><p class="dim">${t('astroNote')}</p></section>
     <section><h3>${t('meBd')}</h3><table class="bd"><tr><th></th><th>${t('bdAge')}</th><th>${t('bdNext')}</th></tr>${pb}</table></section>`;
-  $('meAim').onclick = aimSunCon; $('meTime2').onclick = () => timeMachine(true); $('meSave').onclick = () => saveChart(c);
+  wire(); $('meAim').onclick = aimSunCon; $('meOvBd').onclick = () => openOverview(birthUtc()); $('meTime2').onclick = () => timeMachine(true); $('meSave').onclick = () => saveChart(c);
 }
 // the chart as a picture to keep or send: the wheel on a dark card with the date and the honest sign
 async function saveChart(c) {
@@ -869,6 +909,58 @@ $('meCity').addEventListener('input', () => {
     $('meCities').innerHTML = ''; for (const c of list) { const b = document.createElement('button'); b.type = 'button'; b.textContent = c.name; b.onclick = () => { birth.city = c; saveBirth(); $('meCities').innerHTML = ''; renderMe(); }; $('meCities').appendChild(b); }
   }, 400);
 });
+/* ================= overview: the whole Solar System from outside, on any day ================= */
+let ov = null, ovOn = false;
+async function openOverview(when) {
+  $('me').hidden = true; $('conCard').hidden = true;
+  if (!ov) {
+    await loadSky();
+    const { makeOrrery } = await import('./orrery.js');
+    ov = makeOrrery({ renderer, tex, eqDir, sky: skyData, labelsEl: $('ovLabels'), onPick: ovPick,
+      txt: () => ({ body: id => D.bodies[id], con: id => conName(id), sunIn: (con, sign) => t('ovSunIn', { con: conName(con), sign: signName(sign) }) }) });
+  }
+  ovOn = true; ov.open(when); ov.resize();
+  for (const id of ['hud', 'ctl', 'throttle', 'signs', 'labels', 'card', 'timeBar']) $(id).dataset.ov = $(id).hidden ? '1' : '', $(id).hidden = true;
+  $('ov').hidden = false; $('ovCard').hidden = true; document.body.classList.add('ov-on'); ovUi();
+}
+function closeOverview() {
+  ovOn = false; ov.close(); $('ov').hidden = true; document.body.classList.remove('ov-on');
+  for (const id of ['hud', 'ctl', 'throttle', 'labels', 'timeBar']) $(id).hidden = $(id).dataset.ov === '1';
+  if (simTime) $('timeBar').hidden = false;
+}
+const SPEEDS = [1, 7, 30, 120, 365];
+function ovUi() {
+  if (!ov) return; const d = new Date(ov.date);
+  $('ovDate').textContent = d.toLocaleDateString(D._locale, { day: 'numeric', month: 'long', year: 'numeric' });
+  $('ovPlay').textContent = ov.speed ? '❚❚' : '▶'; $('ovSpeed').textContent = ov.speed ? t('ovSpeed', { n: fmt(Math.abs(ov.speed)) }) + (ov.speed < 0 ? ' ◀' : '') : '';
+  $('ovBd').hidden = !birth.date;
+}
+const step = dir => { const i = SPEEDS.indexOf(Math.abs(ov.speed)), s = Math.sign(ov.speed) || dir; ov.speed = s === dir ? dir * SPEEDS[Math.min(SPEEDS.length - 1, i + 1)] : dir * SPEEDS[0]; ovUi(); };
+$('ovPlay').onclick = () => { ov.speed = ov.speed ? 0 : 1; ovUi(); };
+$('ovFwd').onclick = () => step(1); $('ovBack').onclick = () => step(-1);
+$('ovToday').onclick = () => { ov.date = Date.now(); ov.speed = 0; ovUi(); };
+$('ovBd').onclick = () => { ov.date = birthUtc(); ov.speed = 0; ovUi(); };
+$('ovClose').onclick = closeOverview;
+let ovInfo = [];
+function ovPick(id) {
+  const d = ov.date, x = ovInfo.find(z => z.id === id) || skyAt(d).find(z => z.id === id);
+  let h = `<h2>${D.bodies[id]}</h2>`;
+  if (id === 'earth') { const sn = skyAt(d)[0]; h += `<p>${t('ovFromEarth', { con: conName(sn.con), sign: signName(sn.sign) })}</p>`; }
+  else h += `<p>${t('ovSeen', { con: conName(x.con), sign: signName(x.sign) })}</p><p class="dim">${t('ovDist', { d: distFmt(x.dist * AU) })}</p>`;
+  if (birth.date && PLANETS.some(p => p[0] === id)) { const per = PLANETS.find(p => p[0] === id)[3], age = (d - birthUtc()) / DAY / per; if (age > 0) h += `<p class="dim">${t('ovAge', { n: fmt(age, age < 10 ? 1 : 0) })}</p>`; }
+  h += `<div class="row"><button type="button" class="btn" id="ovFly">${t('ovFly')}</button><button type="button" class="btn ghost" id="ovCx">${t('close')}</button></div>`;
+  $('ovCard').innerHTML = h; $('ovCard').hidden = false; ov.focus(id);
+  $('ovCx').onclick = () => { $('ovCard').hidden = true; ov.focus('sun'); };
+  $('ovFly').onclick = () => {
+    const when = ov.date; closeOverview(); if (space !== 'sol') setSpace('sol');
+    // fly there in the sky of that day; today stays today
+    if (Math.abs(when - Date.now()) > DAY) { simTime = when; $('timeBar').hidden = false; $('timeT').textContent = t('timeOn', { date: new Date(when).toLocaleDateString(D._locale, { day: 'numeric', month: 'long', year: 'numeric' }) }); }
+    placeBodies(simTime ?? Date.now()); startAuto(P[id]);
+  };
+}
+$('ovPick').addEventListener('change', () => { const v = $('ovPick').value; if (v) { ov.date = new Date(v + 'T12:00:00').getTime(); ov.speed = 0; ovUi(); } });
+addEventListener('keydown', e => { if (e.code === 'Escape' && ovOn) closeOverview(); if (e.code === 'KeyC' && !ovOn && e.target.tagName !== 'INPUT') setSky(!skyOn); });
+
 // on your birthday: fireworks, and everyone on air hears about it
 const isBirthday = () => { if (!birth.date) return false; const n = new Date(); return birth.date.slice(5) === `${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
 let bdDone = false;
@@ -970,6 +1062,12 @@ function frame(now) {
   sunStar.material.opacity = THREE.MathUtils.smoothstep(sun.position.length() / heatBody().R, 30, 200);
   sky.position.set(0, 0, 0);
   for (const f of ship.userData.flames) { f.scale.set(1, .15 + st.thr * (1 + Math.random() * .25), 1); f.material.opacity = .25 + st.thr * .7; }
+  if (ovOn) {
+    ovInfo = ov.frame(dt); if (ov.speed) ovUi();
+    if (ovInfo?.[0]) $('ovSun').textContent = t('ovSunIn', { con: conName(ovInfo[0].con), sign: signName(ovInfo[0].sign) });
+    if (!warping) sendState(now);
+    requestAnimationFrame(frame); return;
+  }
   placeCamera(dt, danger);
   ship.userData.model.quaternion.setFromAxisAngle(ZAX, shipFx(myFx, now));
   if (space === 'hole') {
@@ -987,7 +1085,7 @@ function frame(now) {
     proj.copy(CONB.dir).project(camera); edgeMark(CONB, st.aim === CONB && !(proj.z <= 1 && Math.abs(proj.x) < .97 && Math.abs(proj.y) < .97)); }
   requestAnimationFrame(frame);
 }
-addEventListener('resize', () => { mob = innerWidth < 760; renderer.setSize(innerWidth, innerHeight, false); sizeBH(); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+addEventListener('resize', () => { mob = innerWidth < 760; ov?.resize(); renderer.setSize(innerWidth, innerHeight, false); sizeBH(); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 requestAnimationFrame(frame);
 // for tests: put the ship at k radii from a body and face it
 function look(id, k = 3, side = .6, up = .25) {

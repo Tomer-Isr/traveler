@@ -2,7 +2,7 @@
 
 Источник — d3-celestial (Olaf Frohn, BSD-3; звёзды из каталога HYG). Запуск: python tools/build_sky.py
 Формат: stars = [ra°, dec°, mag, B-V, ...] плоско; lines = {id: [[ra, dec, ra, dec, ...], ...]};
-names = {id: [ru, en, he, ra°, dec°]} (точка подписи).
+names = {id: [ru, en, he, ra°, dec°, важность 1–3]} (точка подписи).
 """
 import json, pathlib, urllib.request
 
@@ -32,6 +32,6 @@ for f in get('constellations.lines.json')['features']:
 names = {}
 for f in get('constellations.json')['features']:
     p = f['properties']; lon, lat = f['geometry']['coordinates']
-    names[f['id']] = [p.get('ru') or p['name'], p['name'], p.get('he') or p['name'], ra(lon), round(lat, 2)]
+    names[f['id']] = [p.get('ru') or p['name'], p['name'], p.get('he') or p['name'], ra(lon), round(lat, 2), int(p['rank'])]
 OUT.write_text(json.dumps({'src': 'd3-celestial (BSD-3), HYG', 'stars': stars, 'lines': lines, 'names': names}, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
 print(OUT, OUT.stat().st_size // 1024, 'KB,', len(stars) // 4, 'stars,', len(lines), 'constellations')

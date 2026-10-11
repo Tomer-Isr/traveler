@@ -7,7 +7,7 @@ export const SIGNS = ['Ari', 'Tau', 'Gem', 'Cnc', 'Leo', 'Vir', 'Lib', 'Sco', 'S
 export const SIGN_GLYPH = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓'].map(g => g + '︎');
 export const BODIES = ['sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto'];
 export const GLYPH = { sun: '☉', moon: '☽', mercury: '☿', venus: '♀', mars: '♂', jupiter: '♃', saturn: '♄', uranus: '♅', neptune: '♆', pluto: '♇', asc: 'ASC' };
-const AE = { sun: 'Sun', moon: 'Moon', mercury: 'Mercury', venus: 'Venus', mars: 'Mars', jupiter: 'Jupiter', saturn: 'Saturn', uranus: 'Uranus', neptune: 'Neptune', pluto: 'Pluto' };
+const AE = { sun: 'Sun', moon: 'Moon', earth: 'Earth', mercury: 'Mercury', venus: 'Venus', mars: 'Mars', jupiter: 'Jupiter', saturn: 'Saturn', uranus: 'Uranus', neptune: 'Neptune', pluto: 'Pluto' };
 const norm = x => ((x % 360) + 360) % 360, RAD = Math.PI / 180;
 
 // geocentric ecliptic longitude of date (the one astrology uses)
@@ -40,6 +40,41 @@ export function chart(when, lat, lon) {
     mc = norm(Math.atan2(Math.sin(th), Math.cos(th) * Math.cos(e)) / RAD);
   }
   return { planets, sun: planets[0], sunCon, phase, lit, bright, asc, mc };
+}
+
+// where everything stands on a given day, seen from Earth: constellation (IAU) and sign for the Sun, the Moon, the planets
+const OBS = new A.Observer(0, 0, 0);
+export function skyAt(when) {
+  const d = new Date(when);
+  return BODIES.map(id => {
+    const eq = A.Equator(AE[id], d, OBS, false, true), lon = norm(eclLon(id, d));
+    return { id, con: A.Constellation(eq.ra, eq.dec).symbol, sign: Math.floor(lon / 30), dist: eq.dist };
+  });
+}
+export const moonLit = when => { const p = A.MoonPhase(new Date(when)); return { phase: p, lit: (1 - Math.cos(p * RAD)) / 2 }; };
+// the days of a year when the Sun stands in a constellation (for the zodiac ones; others: none)
+const sunDays = {};
+export function sunSpan(con, year) {
+  const k = con + year; if (sunDays[k] !== undefined) return sunDays[k];
+  // runs of days; a run touching both 1 January and 31 December (Sagittarius) is one span across New Year
+  const runs = []; let cur = null;
+  for (let day = 0; day < 365; day++) {
+    const d = new Date(Date.UTC(year, 0, 1 + day, 12)), eq = A.Equator('Sun', d, OBS, false, true);
+    if (A.Constellation(eq.ra, eq.dec).symbol === con) { if (!cur) runs.push(cur = [d, d]); else cur[1] = d; } else cur = null;
+  }
+  if (!runs.length) return sunDays[k] = null;
+  if (runs.length > 1 && runs[0][0].getUTCDate() === 1 && runs[0][0].getUTCMonth() === 0) return sunDays[k] = [runs[runs.length - 1][0], runs[0][1]];
+  return sunDays[k] = runs[0];
+}
+// planet positions around the Sun (AU) in the game frame (ecliptic = y 0 plane)
+const ROT = A.Rotation_EQJ_ECL();
+export function helioAU(id, when) {
+  const v = A.RotateVector(ROT, A.HelioVector(AE[id], new Date(when)));
+  return [v.x, v.z, -v.y];
+}
+export function moonGeoAU(when) {
+  const v = A.RotateVector(ROT, A.GeoMoon(new Date(when)));
+  return [v.x, v.z, -v.y];
 }
 
 // local wall-clock time in an IANA zone -> UTC milliseconds (historical offsets come from the browser's tz data)
