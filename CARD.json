@@ -1,0 +1,11 @@
+{
+  "title": "Путешественник",
+  "group": "personal",
+  "stage": "live",
+  "stage_note": "полёт по Солнечной системе и онлайн работают, «Моё небо» со звёздами",
+  "progress": null,
+  "next": "чат после входа через Google",
+  "blocker": null,
+  "url": "https://traveler.tomerisr.org.il",
+  "updated": "2026-10-17"
+}
