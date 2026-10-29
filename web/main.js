@@ -1024,6 +1024,7 @@ function applyLang(l) {
   [...$('langs').children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.l === l)));
   const c = cardFor; cardFor = undefined; showCard(c); updateAutoUi();
   starHint(); if (!$('me').hidden) renderMe();
+  $('madeby').href = 'https://iukhvidov.tomerisr.org.il/' + (qLang === 'he' ? 'he' : l) + '?utm_source=traveler&utm_medium=madeby';
   $('home').href = 'https://cosmos.tomerisr.org.il/' + (qLang === 'he' ? 'he/' : l === 'en' ? 'en/' : '');
 }
 LANGS.forEach(l => { const b = document.createElement('button'); b.type = 'button'; b.dataset.l = l; b.textContent = I18N[l]._name; b.onclick = () => applyLang(l); $('langs').appendChild(b); });

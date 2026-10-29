@@ -81,6 +81,8 @@ button{font:inherit;color:inherit}
 .throttle{gap:8px}
 /* back to the main site */
 .home{position:fixed;top:calc(52px + env(safe-area-inset-top,0px));right:16px;z-index:5;font:500 12px var(--f-mono);color:var(--dim);text-decoration:none;background:rgba(8,10,26,.7);border:1px solid var(--line);border-radius:99px;padding:6px 12px}
+.madeby{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(0px + env(safe-area-inset-bottom,0px));z-index:1;margin:0;font:400 13px/1.2 var(--f-text);color:var(--dim);opacity:.8;white-space:nowrap}
+.madeby a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .home:hover{color:var(--dust);border-color:var(--dim)}
 .intro-home{display:inline-block;margin:6px 0 0 14px;color:var(--dim);font-size:14px}
 /* black hole */
